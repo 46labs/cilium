@@ -143,7 +143,6 @@ cilium-agent [flags]
       --enable-ip-masq-agent                                      Enable BPF ip-masq-agent
       --enable-ipip-termination                                   Enable plain IPIP/IP6IP6 termination
       --enable-ipsec                                              Enable IPsec
-      --enable-ipsec-encrypted-overlay                            Enable IPsec encrypted overlay. If enabled tunnel traffic will be encrypted before leaving the host. Requires ipsec and tunnel mode vxlan to be enabled.
       --enable-ipsec-key-watcher                                  Enable watcher for IPsec key. If disabled, a restart of the agent will be necessary on key rotations. (default true)
       --enable-ipv4                                               Enable IPv4 support (default true)
       --enable-ipv4-big-tcp                                       Enable IPv4 BIG TCP option which increases device's maximum GRO/GSO limits for IPv4
@@ -165,6 +164,7 @@ cilium-agent [flags]
       --enable-masquerade-to-route-source                         Masquerade packets to the source IP provided from the routing layer rather than interface address
       --enable-monitor                                            Enable the monitor unix domain socket server (default true)
       --enable-nat46x64-gateway                                   Enable NAT46 and NAT64 gateway
+      --enable-no-service-endpoints-routable                      Enable routes when service has 0 endpoints (default true)
       --enable-node-selector-labels                               Enable use of node label based identity
       --enable-pmtu-discovery                                     Enable path MTU discovery to send ICMP fragmentation-needed replies to the client
       --enable-policy string                                      Enable policy enforcement (default "default")
@@ -231,6 +231,7 @@ cilium-agent [flags]
       --hubble-export-file-path stdout                            Filepath to write Hubble events to. By specifying stdout the flows are logged instead of written to a rotated file.
       --hubble-flowlogs-config-path string                        Filepath with configuration of hubble flowlogs
       --hubble-listen-address string                              An additional address for Hubble server to listen to, e.g. ":4244"
+      --hubble-lost-event-send-interval duration                  Interval at which lost events are sent from the Observer server, if any. (default 1s)
       --hubble-metrics string                                     List of Hubble metrics to enable.
       --hubble-metrics-server string                              Address to serve Hubble metrics on.
       --hubble-metrics-server-enable-tls                          Run the Hubble metrics server on the given listen address with TLS.
@@ -263,6 +264,7 @@ cilium-agent [flags]
       --install-no-conntrack-iptables-rules                       Install Iptables rules to skip netfilter connection tracking on all pod traffic. This option is only effective when Cilium is running in direct routing and full KPR mode. Moreover, this option cannot be enabled when Cilium is running in a managed Kubernetes environment or in a chained CNI setup.
       --install-uplink-routes-for-delegated-ipam                  Install ingress/egress routes through uplink on host for Pods when working with delegated IPAM plugin.
       --ip-masq-agent-config-path string                          ip-masq-agent configuration file path (default "/etc/config/ip-masq-agent")
+      --ip-tracing-option-type uint8                              Specifies what IPv4 option type should be used to extract trace information from a packet; a value of 0 (default) disables IP tracing.
       --ipam string                                               Backend to use for IPAM (default "cluster-pool")
       --ipam-cilium-node-update-rate duration                     Maximum rate at which the CiliumNode custom resource is updated (default 15s)
       --ipam-default-ip-pool string                               Name of the default IP Pool when using multi-pool (default "default")
@@ -375,6 +377,7 @@ cilium-agent [flags]
       --route-metric int                                          Overwrite the metric used by cilium when adding routes to its 'cilium_host' device
       --routing-mode string                                       Routing mode ("native" or "tunnel") (default "tunnel")
       --service-no-backend-response string                        Response to traffic for a service without backends (default "reject")
+      --shell-sock-path string                                    Path to the shell UNIX socket (default "/var/run/cilium/shell.sock")
       --socket-path string                                        Sets daemon's socket path to listen for connections (default "/var/run/cilium/cilium.sock")
       --standalone-dns-proxy-server-port int                      Global port on which the gRPC server for standalone DNS proxy should listen (default 40045)
       --state-dir string                                          Directory path to store runtime state (default "/var/run/cilium")
@@ -408,6 +411,7 @@ cilium-agent [flags]
       --vtep-endpoint strings                                     List of VTEP IP addresses
       --vtep-mac strings                                          List of VTEP MAC addresses for forwarding traffic outside the cluster
       --vtep-mask string                                          VTEP CIDR Mask for all VTEP CIDRs (default "255.255.255.0")
+      --vtep-policy-reconciliation-trigger-interval duration      Time between triggers of vtep policy state reconciliations (default 1s)
       --wireguard-persistent-keepalive duration                   The Wireguard keepalive interval as a Go duration string
       --write-cni-conf-when-ready string                          Write the CNI configuration to the specified path when agent is ready
 ```

@@ -127,14 +127,17 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
 				l4_off, &key, &tuple, svc, &ct_state_new,
 				false, &cluster_id, ext_err, ENDPOINT_NETNS_COOKIE);
 
+		if (IS_ERR(ret)) {
+			if (ret == DROP_NO_SERVICE) {
+				if (!CONFIG(enable_no_service_endpoints_routable))
+					return handle_nonroutable_endpoints_v4(svc);
 #ifdef SERVICE_NO_BACKEND_RESPONSE
-		if (ret == DROP_NO_SERVICE)
-			ret = tail_call_internal(ctx, CILIUM_CALL_IPV4_NO_SERVICE,
-						 ext_err);
+				ret = tail_call_internal(ctx, CILIUM_CALL_IPV4_NO_SERVICE,
+							 ext_err);
 #endif
-
-		if (IS_ERR(ret))
+			}
 			return ret;
+		}
 	}
 skip_service_lookup:
 	/* Store state to be picked up on the continuation tail call. */
@@ -200,14 +203,17 @@ static __always_inline int __per_packet_lb_svc_xlate_6(void *ctx, struct ipv6hdr
 				l4_off, &key, &tuple, svc, &ct_state_new,
 				false, ext_err, ENDPOINT_NETNS_COOKIE);
 
+		if (IS_ERR(ret)) {
+			if (ret == DROP_NO_SERVICE) {
+				if (!CONFIG(enable_no_service_endpoints_routable))
+					return handle_nonroutable_endpoints_v6(svc);
 #ifdef SERVICE_NO_BACKEND_RESPONSE
-		if (ret == DROP_NO_SERVICE)
-			ret = tail_call_internal(ctx, CILIUM_CALL_IPV6_NO_SERVICE,
-						 ext_err);
+				ret = tail_call_internal(ctx, CILIUM_CALL_IPV6_NO_SERVICE,
+							 ext_err);
 #endif
-
-		if (IS_ERR(ret))
+			}
 			return ret;
+		}
 	}
 
 skip_service_lookup:
@@ -1244,12 +1250,20 @@ ct_recreate4:
 	{
 		struct remote_endpoint_info fake_info = {0};
 		struct vtep_key vkey = {};
+		struct vtep_policy_key vpkey = {.prefixlen = 64, .src_ip = ip4->saddr, .dst_ip = ip4->daddr, };
 		struct vtep_value *vtep;
 
 		vkey.vtep_ip = ip4->daddr & VTEP_MASK;
 		vtep = map_lookup_elem(&cilium_vtep_map, &vkey);
-		if (!vtep)
-			goto skip_vtep;
+		if (!vtep) {
+		  if (!info || info->sec_identity == WORLD_IPV4_ID) {
+		    vtep = map_lookup_elem(&cilium_vtep_policy_map, &vpkey);
+		    if (!vtep)
+		      goto skip_vtep;
+		  } else {
+		    goto skip_vtep;
+		  }
+		}
 
 		if (vtep->vtep_mac && vtep->tunnel_endpoint) {
 			if (eth_store_daddr(ctx, (__u8 *)&vtep->vtep_mac, 0) < 0)
@@ -1515,6 +1529,7 @@ int cil_from_container(struct __ctx_buff *ctx)
 	bool valid_ethertype = validate_ethertype(ctx, &proto);
 
 	bpf_clear_meta(ctx);
+	check_and_store_ip_trace_id(ctx);
 
 	/* Workaround for GH-18311 where veth driver might have recorded
 	 * veth's RX queue mapping instead of leaving it at 0. This can
@@ -2388,6 +2403,7 @@ int cil_to_container(struct __ctx_buff *ctx)
 	}
 
 	bpf_clear_meta(ctx);
+	check_and_store_ip_trace_id(ctx);
 
 #if defined(ENABLE_L7_LB)
 	if ((ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_PROXY_EGRESS_EPID) {

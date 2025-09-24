@@ -87,6 +87,9 @@ message Flow {
     // Verdict = DROPPED.
     FileInfo file = 38;
 
+    // IPTraceID relates to the trace ID in the IP options of a packet.
+    IPTraceID ip_trace_id = 40;
+
     // only applicable to Verdict = DROPPED.
     DropReason drop_reason_desc = 25;
 
@@ -207,7 +210,7 @@ enum TraceObservationPoint {
     // TO_CRYPTO indicates network packets are transmitted towards the crypto
     // process for encryption.
     TO_CRYPTO = 13;
-    
+
 }
 
 enum TraceReason {
@@ -640,6 +643,8 @@ message FlowFilter {
 
     // trace_id filters flows by trace ID
     repeated string trace_id = 28;
+    // ip_trace_id filters flows by IPTraceID
+    repeated uint64 ip_trace_id = 39;
 
     // Experimental contains filters that are not stable yet. Support for
     // experimental features is always optional and subject to change.
@@ -721,6 +726,11 @@ message Service {
     string namespace = 2;
 }
 
+message IPTraceID {
+    uint64 trace_id = 1;
+    uint32 ip_option_type = 2;
+}
+
 enum LostEventSource {
     UNKNOWN_LOST_EVENT_SOURCE = 0;
     // PERF_EVENT_RING_BUFFER indicates that events were dropped in the BPF
@@ -747,6 +757,10 @@ message LostEvent {
     // cpu on which the event was lost if the source of lost events is
     // PERF_EVENT_RING_BUFFER.
     google.protobuf.Int32Value cpu = 3;
+    // first is the timestamp of the first event that was lost.
+    google.protobuf.Timestamp first = 4;
+    // last is the timestamp of the last event that was lost.
+    google.protobuf.Timestamp last = 5;
 }
 
 // AgentEventType is the type of agent event. These values are shared with type

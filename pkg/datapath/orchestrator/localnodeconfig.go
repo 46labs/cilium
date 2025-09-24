@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/svcrouteconfig"
 	wgTypes "github.com/cilium/cilium/pkg/wireguard/types"
 )
 
@@ -52,6 +53,7 @@ func newLocalNodeConfig(
 	xdpConfig xdp.Config,
 	lbConfig loadbalancer.Config,
 	kprCfg kpr.KPRConfig,
+	svcCfg svcrouteconfig.RoutesConfig,
 	maglevConfig maglev.Config,
 	mtuTbl statedb.Table[mtu.RouteMTU],
 	wgCfg wgTypes.WireguardConfig,
@@ -121,13 +123,13 @@ func newLocalNodeConfig(
 		EnableLocalNodeRoute:         config.EnableLocalNodeRoute && config.IPAM != ipamOption.IPAMENI && config.IPAM != ipamOption.IPAMAzure && config.IPAM != ipamOption.IPAMAlibabaCloud,
 		EnableWireguard:              wgCfg.Enabled(),
 		EnableIPSec:                  ipsecCfg.Enabled(),
-		EnableIPSecEncryptedOverlay:  ipsecCfg.EncryptedOverlayEnabled(),
 		EncryptNode:                  config.EncryptNode,
 		IPv4PodSubnets:               cidr.NewCIDRSlice(config.IPv4PodSubnets),
 		IPv6PodSubnets:               cidr.NewCIDRSlice(config.IPv6PodSubnets),
 		XDPConfig:                    xdpConfig,
 		LBConfig:                     lbConfig,
 		KPRConfig:                    kprCfg,
+		SvcRouteConfig:               svcCfg,
 		MaglevConfig:                 maglevConfig,
 	}, common.MergeChannels(watchChans...), nil
 }

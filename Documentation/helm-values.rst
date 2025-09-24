@@ -845,7 +845,7 @@
      - list
      - ``[]``
    * - :spelling:ignore:`clustermesh.apiserver.service.nodePort`
-     - Optional port to use as the node port for apiserver access.  WARNING: make sure to configure a different NodePort in each cluster if kube-proxy replacement is enabled, as Cilium is currently affected by a known bug (#24692) when NodePorts are handled by the KPR implementation. If a service with the same NodePort exists both in the local and the remote cluster, all traffic originating from inside the cluster and targeting the corresponding NodePort will be redirected to a local backend, regardless of whether the destination node belongs to the local or the remote cluster.
+     - Optional port to use as the node port for apiserver access.
      - int
      - ``32379``
    * - :spelling:ignore:`clustermesh.apiserver.service.type`
@@ -1256,6 +1256,10 @@
      - Enables masquerading to the source of the route for traffic leaving the node from endpoints.
      - bool
      - ``false``
+   * - :spelling:ignore:`enableNoServiceEndpointsRoutable`
+     - Enable routing to a service that has zero endpoints
+     - bool
+     - ``true``
    * - :spelling:ignore:`enableNonDefaultDenyPolicies`
      - Enable Non-Default-Deny policies
      - bool
@@ -2947,7 +2951,7 @@
    * - :spelling:ignore:`nodeinit.image`
      - node-init image.
      - object
-     - ``{"digest":"sha256:0c91245afb3a4ff78b5cc8c09226806e94a9a10eb0adb74a85e0eeed2a5cae8c","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/startup-script","tag":"1755531540-60ee83e","useDigest":true}``
+     - ``{"digest":"sha256:5bdca3c2dec2c79f58d45a7a560bf1098c2126350c901379fe850b7f78d3d757","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/startup-script","tag":"1755531540-60ee83e","useDigest":true}``
    * - :spelling:ignore:`nodeinit.nodeSelector`
      - Node labels for nodeinit pod assignment ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector
      - object

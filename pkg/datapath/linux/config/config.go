@@ -48,6 +48,7 @@ import (
 	"github.com/cilium/cilium/pkg/maps/nodemap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/maps/vtep"
+	"github.com/cilium/cilium/pkg/maps/vtep_policy"
 	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/option"
 	wgtypes "github.com/cilium/cilium/pkg/wireguard/types"
@@ -65,7 +66,6 @@ type HeaderfileWriter struct {
 	nodeExtraDefineFns []dpdef.Fn
 	sysctl             sysctl.Sysctl
 	kprCfg             kpr.KPRConfig
-	ipsecConfig        datapath.IPsecConfig
 }
 
 func NewHeaderfileWriter(p WriterParams) (datapath.ConfigWriter, error) {
@@ -83,7 +83,6 @@ func NewHeaderfileWriter(p WriterParams) (datapath.ConfigWriter, error) {
 		log:                p.Log,
 		sysctl:             p.Sysctl,
 		kprCfg:             p.KPRConfig,
-		ipsecConfig:        p.IPSecConfig,
 	}, nil
 }
 
@@ -176,7 +175,6 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	cDefinesMap["LOCAL_NODE_ID"] = fmt.Sprintf("%d", identity.ReservedIdentityRemoteNode)
 	cDefinesMap["REMOTE_NODE_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameRemoteNode))
 	cDefinesMap["KUBE_APISERVER_NODE_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameKubeAPIServer))
-	cDefinesMap["ENCRYPTED_OVERLAY_ID"] = fmt.Sprintf("%d", identity.GetReservedID(labels.IDNameEncryptedOverlay))
 	cDefinesMap["CILIUM_LB_SERVICE_MAP_MAX_ENTRIES"] = fmt.Sprintf("%d", cfg.LBConfig.LBServiceMapEntries)
 	cDefinesMap["CILIUM_LB_BACKENDS_MAP_MAX_ENTRIES"] = fmt.Sprintf("%d", cfg.LBConfig.LBBackendMapEntries)
 	cDefinesMap["CILIUM_LB_REV_NAT_MAP_MAX_ENTRIES"] = fmt.Sprintf("%d", cfg.LBConfig.LBRevNatEntries)
@@ -240,10 +238,6 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	if cfg.EnableIPSec {
 		cDefinesMap["ENABLE_IPSEC"] = "1"
-
-		if h.ipsecConfig.EncryptedOverlayEnabled() {
-			cDefinesMap["ENABLE_ENCRYPTED_OVERLAY"] = "1"
-		}
 	}
 
 	if cfg.EnableWireguard {
@@ -595,6 +589,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	}
 
 	cDefinesMap["VTEP_MAP_SIZE"] = fmt.Sprintf("%d", vtep.MaxEntries)
+	cDefinesMap["VTEP_POLICY_MAP_SIZE"] = fmt.Sprintf("%d", vtep_policy.MaxEntries)
 
 	vlanFilter, err := vlanFilterMacros(nativeDevices)
 	if err != nil {

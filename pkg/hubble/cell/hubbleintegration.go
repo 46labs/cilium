@@ -31,6 +31,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/metrics"
 	"github.com/cilium/cilium/pkg/hubble/monitor"
 	"github.com/cilium/cilium/pkg/hubble/observer"
+	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	"github.com/cilium/cilium/pkg/hubble/parser"
 	"github.com/cilium/cilium/pkg/hubble/peer"
@@ -75,6 +76,8 @@ type hubbleIntegration struct {
 
 	// payloadParser is used to decode monitor events into Hubble events.
 	payloadParser parser.Decoder
+	// nsManager is used to monitor the namespaces seen in Hubble flows.
+	nsManager namespace.Manager
 
 	// GRPC metrics are registered on the Hubble gRPC server and are
 	// exposed by the Hubble metrics server (from hubble-metrics cell).
@@ -98,6 +101,7 @@ func new(
 	exporterBuilders []*exportercell.FlowLogExporterBuilder,
 	dropEventEmitter dropeventemitter.FlowProcessor,
 	payloadParser parser.Decoder,
+	nsManager namespace.Manager,
 	grpcMetrics *grpc_prometheus.ServerMetrics,
 	metricsFlowProcessor metrics.FlowProcessor,
 	config config,
@@ -119,14 +123,15 @@ func new(
 		endpointManager:      endpointManager,
 		ipcache:              ipcache,
 		cgroupManager:        cgroupManager,
-		dropEventEmitter:     dropEventEmitter,
 		nodeManager:          nodeManager,
 		nodeLocalStore:       nodeLocalStore,
 		monitorAgent:         monitorAgent,
 		tlsConfigPromise:     tlsConfigPromise,
 		observerOptions:      observerOptions,
 		exporters:            exporters,
+		dropEventEmitter:     dropEventEmitter,
 		payloadParser:        payloadParser,
+		nsManager:            nsManager,
 		grpcMetrics:          grpcMetrics,
 		metricsFlowProcessor: metricsFlowProcessor,
 		config:               config,
@@ -243,6 +248,7 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 	observerOpts = append(observerOpts,
 		observeroption.WithMaxFlows(maxFlows),
 		observeroption.WithMonitorBuffer(h.config.EventQueueSize),
+		observeroption.WithLostEventSendInterval(h.config.LostEventSendInterval),
 	)
 
 	// register exporters
@@ -263,12 +269,9 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 	// for explicit ordering of known dependencies
 	observerOpts = append(observerOpts, h.observerOptions...)
 
-	namespaceManager := observer.NewNamespaceManager()
-	go namespaceManager.Run(ctx)
-
 	hubbleObserver, err := observer.NewLocalServer(
 		h.payloadParser,
-		namespaceManager,
+		h.nsManager,
 		h.log,
 		observerOpts...,
 	)
@@ -276,7 +279,7 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 		return nil, fmt.Errorf("failed to initialize observer server: %w", err)
 	}
 	go hubbleObserver.Start()
-	h.monitorAgent.RegisterNewConsumer(monitor.NewConsumer(hubbleObserver))
+	h.monitorAgent.RegisterNewConsumer(monitor.NewConsumer(hubbleObserver, h.config.LostEventSendInterval))
 
 	tlsEnabled := h.tlsConfigPromise != nil
 

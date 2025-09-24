@@ -33,12 +33,6 @@
   {{- end }}
   {{- $defaultBpfCtTcpMax = 0 -}}
   {{- $defaultBpfCtAnyMax = 0 -}}
-  {{- $defaultKubeProxyReplacement = "probe" -}}
-{{- end -}}
-
-{{- /* Default values when 1.9 was initially deployed */ -}}
-{{- if semverCompare ">=1.9" (default "1.9" .Values.upgradeCompatibility) -}}
-  {{- $defaultKubeProxyReplacement = "probe" -}}
 {{- end -}}
 
 {{- /* Default values when 1.10 was initially deployed */ -}}
@@ -52,7 +46,6 @@
   {{- if .Values.azure.enabled }}
       {{- $azureUsePrimaryAddress = "false" -}}
   {{- end }}
-  {{- $defaultKubeProxyReplacement = "disabled" -}}
   {{- $defaultDNSProxyEnableTransparentMode = "true" -}}
 {{- end -}}
 
@@ -780,6 +773,10 @@ data:
   kube-proxy-replacement-healthz-bind-address: {{ default "" .Values.kubeProxyReplacementHealthzBindAddr | quote}}
 {{- end }}
 
+{{- if hasKey .Values "enableNoServiceEndpointsRoutable" }}
+  enable-no-service-endpoints-routable: {{ .Values.enableNoServiceEndpointsRoutable | quote }}
+{{- end }}
+
 {{- if $socketLB }}
 {{- if hasKey $socketLB "enabled" }}
   bpf-lb-sock: {{ $socketLB.enabled | quote }}
@@ -970,6 +967,10 @@ data:
 {{- if hasKey .Values.hubble "eventBufferCapacity" }}
   # Capacity of the buffer to store recent events.
   hubble-event-buffer-capacity: {{ .Values.hubble.eventBufferCapacity | quote }}
+{{- end }}
+{{- if hasKey .Values.hubble "lostEventSendInterval" }}
+  # Interval to send lost events from Observer server.
+  hubble-lost-event-send-interval: {{ include "validateDuration" .Values.hubble.lostEventSendInterval | quote }}
 {{- end }}
 {{- if or .Values.hubble.metrics.enabled .Values.hubble.metrics.dynamic.enabled}}
   # Address to expose Hubble metrics (e.g. ":7070"). Metrics server will be disabled if this

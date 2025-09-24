@@ -134,12 +134,9 @@ func NewClusterMesh(lifecycle cell.Lifecycle, c Configuration) *ClusterMesh {
 
 	nodeName := nodeTypes.GetName()
 	cm := &ClusterMesh{
-		conf:     c,
-		nodeName: nodeName,
-		globalServices: common.NewGlobalServiceCache(
-			c.Logger,
-			c.Metrics.TotalGlobalServices.WithLabelValues(c.ClusterInfo.Name, nodeName),
-		),
+		conf:           c,
+		nodeName:       nodeName,
+		globalServices: common.NewGlobalServiceCache(c.Logger),
 		FeatureMetrics: c.FeatureMetrics,
 	}
 
@@ -210,12 +207,14 @@ func (cm *ClusterMesh) NewRemoteCluster(name string, status common.StatusFunc) c
 			cm.conf.ServiceMerger.MergeExternalServiceDelete,
 		),
 		store.RWSWithOnSyncCallback(func(ctx context.Context) { close(rc.synced.services) }),
+		store.RWSWithEntriesMetric(cm.conf.Metrics.TotalServices.WithLabelValues(cm.conf.ClusterInfo.Name, cm.nodeName, rc.name)),
 	)
 
 	rc.ipCacheWatcher = ipcache.NewIPIdentityWatcher(
 		cm.conf.Logger,
 		name, cm.conf.IPCache, cm.conf.StoreFactory, source.ClusterMesh,
 		store.RWSWithOnSyncCallback(func(ctx context.Context) { close(rc.synced.ipcache) }),
+		store.RWSWithEntriesMetric(cm.conf.Metrics.TotalEndpoints.WithLabelValues(cm.conf.ClusterInfo.Name, cm.nodeName, rc.name)),
 	)
 	rc.ipCacheWatcherExtraOpts = cm.conf.IPCacheWatcherExtraOpts
 
@@ -281,9 +280,7 @@ func (cm *ClusterMesh) synced(ctx context.Context, toWaitFn func(*remoteCluster)
 
 // Status returns the status of the ClusterMesh subsystem
 func (cm *ClusterMesh) Status() (status *models.ClusterMeshStatus) {
-	status = &models.ClusterMeshStatus{
-		NumGlobalServices: int64(cm.globalServices.Size()),
-	}
+	status = &models.ClusterMeshStatus{}
 
 	cm.common.ForEachRemoteCluster(func(rci common.RemoteCluster) error {
 		rc := rci.(*remoteCluster)
