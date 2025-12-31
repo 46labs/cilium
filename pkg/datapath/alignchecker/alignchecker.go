@@ -9,6 +9,7 @@ import (
 	lbmap "github.com/cilium/cilium/pkg/loadbalancer/maps"
 	"github.com/cilium/cilium/pkg/maps/authmap"
 	"github.com/cilium/cilium/pkg/maps/bwmap"
+	"github.com/cilium/cilium/pkg/maps/crap"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/maps/egressmap"
 	"github.com/cilium/cilium/pkg/maps/eventsmap"
@@ -93,6 +94,8 @@ var (
 		"debug_capture_msg":       {monitor.DebugCapture{}},
 		"policy_verdict_notify":   {monitor.PolicyVerdictNotify{}},
 		"trace_sock_notify":       {monitor.TraceSockNotify{}},
+		"crap_key":                {crap.CrapKey{}},
+		"crap_value":              {crap.CrapVal{}},
 	}
 	toCheckSizes = map[string][]any{
 		"__u16": {

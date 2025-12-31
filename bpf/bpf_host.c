@@ -58,6 +58,7 @@
 #include "lib/wireguard.h"
 #include "lib/l2_responder.h"
 #include "lib/vtep.h"
+#include "lib/crap.h"
 #include "lib/subnet.h"
 
  #define host_egress_policy_hook(ctx, src_sec_identity, ext_err) CTX_ACT_OK
@@ -704,6 +705,43 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
+
+	struct crap_key key;
+	struct crap_value *tv;
+
+	key.dst_ip = ip4->daddr;
+
+	tv = map_lookup_elem(&cilium_crap_map, &key);
+	if (tv) {
+		if (ip4->protocol != IPPROTO_TCP && ip4->protocol != IPPROTO_UDP)
+			goto skip_crap;
+
+		__be16 dport_be;
+
+		if (l4_load_port(ctx, ETH_HLEN + ipv4_hdrlen(ip4) + TCP_DPORT_OFF, &dport_be))
+			goto skip_crap;
+
+		if (!crap_port_match(bpf_ntohs(dport_be), tv))
+			goto skip_crap;
+
+		ep = __lookup_ip4_endpoint(tv->pod_ip);
+		if (ep) {
+			int l3_off = ETH_HLEN;
+
+			return ipv4_local_delivery(ctx, l3_off, secctx, MARK_MAGIC_IDENTITY, ip4, ep,
+						   METRIC_INGRESS, true, false, 0);
+		}
+
+		info = lookup_ip4_remote_endpoint(tv->pod_ip, 0);
+		if (info) {
+			return encap_and_redirect_with_nodeid(ctx, info, secctx,
+							      info->sec_identity, &trace,
+							      bpf_htons(ETH_P_IP));
+		}
+	}
+
+skip_crap:
+#endif /* TUNNEL_MODE */
 
 #ifdef ENABLE_HOST_FIREWALL
 	from_host_raw = ctx_load_and_clear_meta(ctx, CB_FROM_HOST);

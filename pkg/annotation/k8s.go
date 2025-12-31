@@ -156,6 +156,14 @@ const (
 	// the latter two, one can set the annotation with the value "LoadBalancer".
 	ServiceTypeExposure = ServicePrefix + "/type"
 
+	ServiceRaw = ServicePrefix + "/raw"
+
+	// ServiceRawPorts is the annotation used to specify a port range for CRAP
+	// matching. Format: "port" (single port) or "port_begin-port_end" (inclusive range).
+	// When set, CRAP rules for this service only apply to packets whose destination
+	// port falls within the specified range.
+	ServiceRawPorts = ServicePrefix + "/raw-ports"
+
 	// ServiceSourceRangesPolicy is the annotation name used to specify the policy
 	// of the user-provided loadBalancerSourceRanges, meaning whether this CIDR
 	// list should act as an allow- or deny-list. Both "allow" or "deny" are
