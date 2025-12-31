@@ -111,3 +111,7 @@ add_type(struct node_value);
 #include "lib/lrp.h"
 add_type(struct skip_lb4_key);
 add_type(struct skip_lb6_key);
+
+#include "lib/crap.h"
+add_type(struct crap_key);
+add_type(struct crap_value);
