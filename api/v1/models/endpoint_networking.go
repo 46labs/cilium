@@ -43,6 +43,9 @@ type EndpointNetworking struct {
 
 	// MAC address
 	Mac string `json:"mac,omitempty"`
+
+	// MTU
+	Mtu int64 `json:"mtu,omitempty"`
 }
 
 // Validate validates this endpoint networking

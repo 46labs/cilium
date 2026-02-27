@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"strconv"
 	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -257,6 +258,17 @@ func (m *endpointAPIManager) CreateEndpoint(ctx context.Context, epTemplate *mod
 					return invalidDataError(ep, err)
 				}
 				ep.SetMac(mac)
+			}
+			if mtuStr, ok := pod.Annotations[annotation.PodAnnotationMTU]; !ep.GetDisableLegacyIdentifiers() && ok {
+				mtu, err := strconv.ParseUint(mtuStr, 10, 16)
+				if err != nil {
+					m.logger.Error("Unable to parse MTU",
+						logfields.Error, err,
+						logfields.K8sPodName, epTemplate.K8sNamespace+"/"+epTemplate.K8sPodName,
+					)
+					return invalidDataError(ep, err)
+				}
+				ep.SetMtu(uint16(mtu))
 			}
 		}
 	}

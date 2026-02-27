@@ -27,6 +27,7 @@ type LinkConfig struct {
 	GSOIPv4MaxSize int
 
 	DeviceMTU      int
+	DeviceMac      string
 	DeviceHeadroom uint16
 	DeviceTailroom uint16
 }

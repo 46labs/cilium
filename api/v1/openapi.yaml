@@ -937,6 +937,26 @@ paths:
           x-go-name: Disabled
           schema:
             "$ref": "#/definitions/Error"
+  "/pod_annotations":
+    get:
+      summary: Lists cilium-specific annotations for a pod.
+      description: Retrieves cilium-specific annotations for a pod.
+      tags:
+        - daemon
+      parameters:
+        - "$ref": "#/parameters/k8s-namespace"
+        - "$ref": "#/parameters/k8s-pod"
+      responses:
+        '200':
+          description: Success
+          schema:
+            "$ref": "#/definitions/PodAnnotationsReply"
+        '400':
+          description: Invalid request
+          schema:
+            "$ref": "#/definitions/Error"
+        '404':
+          description: No such pod was found
 parameters:
   endpoint-id:
     name: id
@@ -975,6 +995,18 @@ parameters:
     description: |
       Cluster wide unique identifier of a security identity.
     in: path
+    required: true
+    type: string
+  k8s-namespace:
+    name: namespace
+    description: k8s namespace
+    in: query
+    required: true
+    type: string
+  k8s-pod:
+    name: pod
+    description: k8s pod name
+    in: query
     required: true
     type: string
   labels:
@@ -1752,6 +1784,9 @@ definitions:
       mac:
         description: MAC address
         type: string
+      mtu:
+        description: MTU
+        type: integer
       interface-name:
         description: Name of network device in host netns
         type: string
@@ -2278,6 +2313,14 @@ definitions:
         type: array
         items:
           "$ref": "#/definitions/RemoteCluster"
+  PodAnnotationsReply:
+    description: |-
+      Set of pod's annotations
+    properties:
+      annotations:
+        type: object
+        additionalProperties:
+          type: string
   RemoteCluster:
     description: |-
       Status of remote cluster

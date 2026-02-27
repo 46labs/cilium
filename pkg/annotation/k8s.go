@@ -44,6 +44,9 @@ const (
 	// PodAnnotationMAC is used to store the MAC address of the Pod.
 	PodAnnotationMAC = CNIPrefix + "/mac-address"
 
+	// PodAnnotationMAC is used to store the MTU of the Pod.
+	PodAnnotationMTU = CNIPrefix + "/mtu"
+
 	// PolicyName / PolicyNameAlias is an optional annotation to the NetworkPolicy
 	// resource which specifies the name of the policy node to which all
 	// rules should be applied to.

@@ -207,6 +207,7 @@ func (e *Endpoint) getModelNetworkingRLocked() *models.EndpointNetworking {
 		ContainerInterfaceName: e.containerIfName,
 		Mac:                    e.mac.String(),
 		HostMac:                e.nodeMAC.String(),
+		Mtu:                    int64(e.mtu),
 	}
 }
 

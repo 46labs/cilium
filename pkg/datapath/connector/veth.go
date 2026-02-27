@@ -49,9 +49,21 @@ func SetupVethWithNames(defaultLogger *slog.Logger, lxcIfName, peerIfName string
 	if err != nil {
 		return nil, nil, fmt.Errorf("unable to generate rnd mac addr: %w", err)
 	}
-	epLXCMAC, err := mac.GenerateRandMAC()
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to generate rnd mac addr: %w", err)
+
+	var epLXCMAC mac.MAC
+
+	if cfg.DeviceMac != "" {
+		epLXCMAC, err = mac.ParseMAC(cfg.DeviceMac)
+
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		epLXCMAC, err = mac.GenerateRandMAC()
+
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to generate rnd mac addr: %w", err)
+		}
 	}
 
 	veth := &netlink.Veth{

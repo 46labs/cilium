@@ -239,6 +239,12 @@ func NewCiliumAPIAPI(spec *loads.Document) *CiliumAPIAPI {
 			return middleware.NotImplemented("operation daemon.GetNodeIds has not yet been implemented")
 		}),
 
+		DaemonGetPodAnnotationsHandler: daemon.GetPodAnnotationsHandlerFunc(func(params daemon.GetPodAnnotationsParams) middleware.Responder {
+			_ = params
+
+			return middleware.NotImplemented("operation daemon.GetPodAnnotations has not yet been implemented")
+		}),
+
 		PolicyGetPolicyHandler: policy.GetPolicyHandlerFunc(func(params policy.GetPolicyParams) middleware.Responder {
 			_ = params
 
@@ -408,6 +414,8 @@ type CiliumAPIAPI struct {
 	DaemonGetMapNameEventsHandler daemon.GetMapNameEventsHandler
 	// DaemonGetNodeIdsHandler sets the operation handler for the get node ids operation
 	DaemonGetNodeIdsHandler daemon.GetNodeIdsHandler
+	// DaemonGetPodAnnotationsHandler sets the operation handler for the get pod annotations operation
+	DaemonGetPodAnnotationsHandler daemon.GetPodAnnotationsHandler
 	// PolicyGetPolicyHandler sets the operation handler for the get policy operation
 	PolicyGetPolicyHandler policy.GetPolicyHandler
 	// PolicyGetPolicySelectorsHandler sets the operation handler for the get policy selectors operation
@@ -601,6 +609,9 @@ func (o *CiliumAPIAPI) Validate() error {
 	}
 	if o.DaemonGetNodeIdsHandler == nil {
 		unregistered = append(unregistered, "daemon.GetNodeIdsHandler")
+	}
+	if o.DaemonGetPodAnnotationsHandler == nil {
+		unregistered = append(unregistered, "daemon.GetPodAnnotationsHandler")
 	}
 	if o.PolicyGetPolicyHandler == nil {
 		unregistered = append(unregistered, "policy.GetPolicyHandler")
@@ -852,6 +863,10 @@ func (o *CiliumAPIAPI) initHandlerCache() {
 		o.handlers["GET"] = make(map[string]http.Handler)
 	}
 	o.handlers["GET"]["/node/ids"] = daemon.NewGetNodeIds(o.context, o.DaemonGetNodeIdsHandler)
+	if o.handlers["GET"] == nil {
+		o.handlers["GET"] = make(map[string]http.Handler)
+	}
+	o.handlers["GET"]["/pod_annotations"] = daemon.NewGetPodAnnotations(o.context, o.DaemonGetPodAnnotationsHandler)
 	if o.handlers["GET"] == nil {
 		o.handlers["GET"] = make(map[string]http.Handler)
 	}

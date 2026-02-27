@@ -78,6 +78,8 @@ type ClientService interface {
 
 	GetNodeIds(params *GetNodeIdsParams, opts ...ClientOption) (*GetNodeIdsOK, error)
 
+	GetPodAnnotations(params *GetPodAnnotationsParams, opts ...ClientOption) (*GetPodAnnotationsOK, error)
+
 	PatchConfig(params *PatchConfigParams, opts ...ClientOption) (*PatchConfigOK, error)
 
 	SetTransport(transport runtime.ClientTransport)
@@ -478,6 +480,51 @@ func (a *Client) GetNodeIds(params *GetNodeIdsParams, opts ...ClientOption) (*Ge
 	//
 	// safeguard: normally, in the absence of a default response, unknown success responses return an error above: so this is a codegen issue
 	msg := fmt.Sprintf("unexpected success response for GetNodeIds: API contract not enforced by server. Client expected to get an error, but got: %T", result)
+	panic(msg)
+}
+
+/*
+GetPodAnnotations lists cilium specific annotations for a pod
+
+Retrieves cilium-specific annotations for a pod.
+*/
+func (a *Client) GetPodAnnotations(params *GetPodAnnotationsParams, opts ...ClientOption) (*GetPodAnnotationsOK, error) {
+	// NOTE: parameters are not validated before sending
+	if params == nil {
+		params = NewGetPodAnnotationsParams()
+	}
+	op := &runtime.ClientOperation{
+		ID:                 "GetPodAnnotations",
+		Method:             "GET",
+		PathPattern:        "/pod_annotations",
+		ProducesMediaTypes: []string{"application/json"},
+		ConsumesMediaTypes: []string{"application/json"},
+		Schemes:            []string{"http"},
+		Params:             params,
+		Reader:             &GetPodAnnotationsReader{formats: a.formats},
+		Context:            params.Context,
+		Client:             params.HTTPClient,
+	}
+	for _, opt := range opts {
+		opt(op)
+	}
+	result, err := a.transport.Submit(op)
+	if err != nil {
+		return nil, err
+	}
+
+	// only one success response has to be checked
+	success, ok := result.(*GetPodAnnotationsOK)
+	if ok {
+		return success, nil
+	}
+
+	// unexpected success response.
+
+	// no default response is defined.
+	//
+	// safeguard: normally, in the absence of a default response, unknown success responses return an error above: so this is a codegen issue
+	msg := fmt.Sprintf("unexpected success response for GetPodAnnotations: API contract not enforced by server. Client expected to get an error, but got: %T", result)
 	panic(msg)
 }
 

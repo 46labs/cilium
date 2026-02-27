@@ -252,6 +252,9 @@ type Endpoint struct {
 	// Constant after endpoint creation / restoration.
 	mac mac.MAC // Container MAC address.
 
+	// mtu is the MTU of the endpoint
+	mtu uint16 // Container MTU.
+
 	// IPv6 is the IPv6 address of the endpoint.
 	// Constant after endpoint creation / restoration.
 	IPv6 netip.Addr
@@ -1471,6 +1474,13 @@ func (e *Endpoint) SetMac(mac mac.MAC) {
 	e.unconditionalLock()
 	defer e.unlock()
 	e.mac = mac
+}
+
+// SetMtu modifies the endpoint's MTU.
+func (e *Endpoint) SetMtu(mtu uint16) {
+	e.unconditionalLock()
+	defer e.unlock()
+	e.mtu = mtu
 }
 
 // GetDisableLegacyIdentifiers returns the endpoint's disableLegacyIdentifiers.

@@ -74,6 +74,7 @@ import (
 	nodesync "github.com/cilium/cilium/pkg/node/sync"
 	"github.com/cilium/cilium/pkg/nodediscovery"
 	"github.com/cilium/cilium/pkg/option"
+	podRestApi "github.com/cilium/cilium/pkg/pod/restapi"
 	policy "github.com/cilium/cilium/pkg/policy/cell"
 	policyDirectory "github.com/cilium/cilium/pkg/policy/directory"
 	policyK8s "github.com/cilium/cilium/pkg/policy/k8s"
@@ -366,6 +367,9 @@ var (
 
 		// CRAP cell
 		raw.Cell,
+
+		// k8s pod info rest api
+		podRestApi.Cell,
 	)
 )
 

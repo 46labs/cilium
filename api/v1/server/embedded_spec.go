@@ -1272,6 +1272,40 @@ func init() {
         }
       }
     },
+    "/pod_annotations": {
+      "get": {
+        "description": "Retrieves cilium-specific annotations for a pod.",
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Lists cilium-specific annotations for a pod.",
+        "parameters": [
+          {
+            "$ref": "#/parameters/k8s-namespace"
+          },
+          {
+            "$ref": "#/parameters/k8s-pod"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "$ref": "#/definitions/PodAnnotationsReply"
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "404": {
+            "description": "No such pod was found"
+          }
+        }
+      }
+    },
     "/policy": {
       "get": {
         "description": "Returns the entire policy tree with all children.\n\nDeprecated: will be removed in v1.19\n",
@@ -2858,6 +2892,10 @@ func init() {
         "mac": {
           "description": "MAC address",
           "type": "string"
+        },
+        "mtu": {
+          "description": "MTU",
+          "type": "integer"
         }
       }
     },
@@ -4089,6 +4127,17 @@ func init() {
         }
       }
     },
+    "PodAnnotationsReply": {
+      "description": "Set of pod's annotations",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "Policy": {
       "description": "Policy definition\nDeprecated, will be removed in v1.19.\n",
       "type": "object",
@@ -5035,6 +5084,20 @@ func init() {
       "type": "string",
       "name": "pool",
       "in": "query"
+    },
+    "k8s-namespace": {
+      "type": "string",
+      "description": "k8s namespace",
+      "name": "namespace",
+      "in": "query",
+      "required": true
+    },
+    "k8s-pod": {
+      "type": "string",
+      "description": "k8s pod name",
+      "name": "pod",
+      "in": "query",
+      "required": true
     },
     "labels": {
       "description": "List of labels\n",
@@ -6553,6 +6616,48 @@ func init() {
                 "$ref": "#/definitions/NodeID"
               }
             }
+          }
+        }
+      }
+    },
+    "/pod_annotations": {
+      "get": {
+        "description": "Retrieves cilium-specific annotations for a pod.",
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Lists cilium-specific annotations for a pod.",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "k8s namespace",
+            "name": "namespace",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "k8s pod name",
+            "name": "pod",
+            "in": "query",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "$ref": "#/definitions/PodAnnotationsReply"
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "404": {
+            "description": "No such pod was found"
           }
         }
       }
@@ -8230,6 +8335,10 @@ func init() {
         "mac": {
           "description": "MAC address",
           "type": "string"
+        },
+        "mtu": {
+          "description": "MTU",
+          "type": "integer"
         }
       }
     },
@@ -9830,6 +9939,17 @@ func init() {
         }
       }
     },
+    "PodAnnotationsReply": {
+      "description": "Set of pod's annotations",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "Policy": {
       "description": "Policy definition\nDeprecated, will be removed in v1.19.\n",
       "type": "object",
@@ -10844,6 +10964,20 @@ func init() {
       "type": "string",
       "name": "pool",
       "in": "query"
+    },
+    "k8s-namespace": {
+      "type": "string",
+      "description": "k8s namespace",
+      "name": "namespace",
+      "in": "query",
+      "required": true
+    },
+    "k8s-pod": {
+      "type": "string",
+      "description": "k8s pod name",
+      "name": "pod",
+      "in": "query",
+      "required": true
     },
     "labels": {
       "description": "List of labels\n",

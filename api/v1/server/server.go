@@ -95,6 +95,7 @@ type apiParams struct {
 	DaemonGetMapNameHandler              daemon.GetMapNameHandler
 	DaemonGetMapNameEventsHandler        daemon.GetMapNameEventsHandler
 	DaemonGetNodeIdsHandler              daemon.GetNodeIdsHandler
+	DaemonGetPodAnnotationsHandler       daemon.GetPodAnnotationsHandler
 	PolicyGetPolicyHandler               policy.GetPolicyHandler
 	PolicyGetPolicySelectorsHandler      policy.GetPolicySelectorsHandler
 	PrefilterGetPrefilterHandler         prefilter.GetPrefilterHandler
@@ -145,6 +146,7 @@ func newAPI(p apiParams) *restapi.CiliumAPIAPI {
 	api.DaemonGetMapNameHandler = p.DaemonGetMapNameHandler
 	api.DaemonGetMapNameEventsHandler = p.DaemonGetMapNameEventsHandler
 	api.DaemonGetNodeIdsHandler = p.DaemonGetNodeIdsHandler
+	api.DaemonGetPodAnnotationsHandler = p.DaemonGetPodAnnotationsHandler
 	api.PolicyGetPolicyHandler = p.PolicyGetPolicyHandler
 	api.PolicyGetPolicySelectorsHandler = p.PolicyGetPolicySelectorsHandler
 	api.PrefilterGetPrefilterHandler = p.PrefilterGetPrefilterHandler

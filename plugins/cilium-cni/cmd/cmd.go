@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -567,6 +568,14 @@ func (cmd *Cmd) Add(args *skel.CmdArgs) (err error) {
 		return err
 	}
 
+	podCniConf, err := getPodCniConfig(c, conf, string(cniArgs.K8S_POD_NAMESPACE), string(cniArgs.K8S_POD_NAME))
+	if err != nil {
+		return err
+	}
+
+	conf.RouteMTU = cmp.Or(podCniConf.RouteMtu, conf.RouteMTU)
+	conf.DeviceMTU = cmp.Or(podCniConf.DeviceMtu, conf.DeviceMTU)
+
 	for _, hook := range cmd.onConfigReady {
 		if err := hook.OnConfigReady(n, cniArgs, conf); err != nil {
 			return err
@@ -674,6 +683,7 @@ func (cmd *Cmd) Add(args *skel.CmdArgs) (err error) {
 			GROIPv4MaxSize: int(conf.GROIPV4MaxSize),
 			GSOIPv4MaxSize: int(conf.GSOIPV4MaxSize),
 			DeviceMTU:      int(conf.DeviceMTU),
+			DeviceMac:      podCniConf.DeviceMac,
 			DeviceHeadroom: uint16(conf.DeviceHeadroom),
 			DeviceTailroom: uint16(conf.DeviceTailroom),
 		}
