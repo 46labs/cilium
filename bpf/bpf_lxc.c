@@ -473,7 +473,10 @@ int NAME(struct __ctx_buff *ctx)						\
 	tuple->nexthdr = ip4->protocol;						\
 	tuple->daddr = ip4->daddr;						\
 	tuple->saddr = ip4->saddr;						\
+  tuple->sip_call_id_hash = sip_inspect(ctx); \
 	ct_buffer.l4_off = ETH_HLEN + ipv4_hdrlen(ip4);				\
+  \
+  if(tuple->sip_call_id_hash) _printk(#NAME); \
 										\
 	map = select_ct_map4(ctx, DIR, tuple);					\
 	if (!map)								\
@@ -496,7 +499,7 @@ int NAME(struct __ctx_buff *ctx)						\
 			scope = SCOPE_FORWARD;					\
 		if (is_defined(ENABLE_L7_LB) &&					\
 		    (ctx_load_meta(ctx, CB_FROM_HOST) == FROM_HOST_L7_LB))	\
-			scope = SCOPE_FORWARD;					\
+			scope = SCOPE_FORWARD;				\
 	}									\
 										\
 	ct_buffer.ret = ct_lookup4(map, tuple, ctx, ip4, ct_buffer.l4_off,	\
@@ -1354,6 +1357,7 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 	switch (ct_status) {
 	case CT_NEW:
 	case CT_ESTABLISHED:
+
 #if defined(ENABLE_L7_LB)
 		from_l7lb = ctx_load_meta(ctx, CB_FROM_HOST) == FROM_HOST_L7_LB;
 
@@ -1418,6 +1422,7 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		break;
 	case CT_RELATED:
 	case CT_REPLY:
+
 		/* Skip policy enforcement for return traffic. */
 
 		/* Check if this is return traffic to an ingress proxy. */
@@ -1433,12 +1438,14 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 
 		break;
 	default:
+
 		return DROP_UNKNOWN_CT;
 	}
 
 	switch (ct_status) {
 	case CT_NEW:
 ct_recreate4:
+
 		/* New connection implies that rev_nat_index remains untouched
 		 * to the index provided by the loadbalancer (if it applied).
 		 * Create a CT entry which allows to track replies and to
@@ -1459,6 +1466,9 @@ ct_recreate4:
 		 */
 		ct_state_new.proxy_redirect = proxy_port > 0;
 		ct_state_new.from_l7lb = from_l7lb;
+    if (egress_gw_sip_inspection_needed(ip4->saddr, ip4->daddr)) {
+        tuple->sip_call_id_hash = sip_inspect(ctx);
+      }
 
 		ret = ct_create4(ct_map, ct_related_map, tuple, ctx,
 				 CT_EGRESS, &ct_state_new, ext_err);
@@ -1467,6 +1477,7 @@ ct_recreate4:
 		break;
 
 	case CT_ESTABLISHED:
+
 		/* Did we end up at a stale non-service entry? Recreate if so. */
 		if (unlikely(ct_state->rev_nat_index != ct_state_new.rev_nat_index))
 			goto ct_recreate4;
@@ -1488,6 +1499,7 @@ ct_recreate4:
 
 	case CT_RELATED:
 	case CT_REPLY:
+
 #ifdef ENABLE_NODEPORT
 		/* This handles reply traffic for the case where the nodeport EP
 		 * is local to the node. We'll do the tail call to perform
@@ -1509,6 +1521,7 @@ ct_recreate4:
 
 		break;
 	default:
+
 		return DROP_UNKNOWN_CT;
 	}
 

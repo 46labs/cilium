@@ -41,6 +41,8 @@ struct lb6_service {
 	__u8 flags;
 	__u8 flags2;
 	__u16 qcount;
+  __u8 sip_inspect;
+  __u8 pad[3];
 };
 
 /* See lb4_backend comments */
@@ -65,6 +67,7 @@ struct lb4_key {
 	__be32 address;		/* Service virtual IPv4 address */
 	__be16 dport;		/* L4 port filter, if unset, all ports apply */
 	__u16 backend_slot;	/* Backend iterator, 0 indicates the svc frontend */
+  __u32 sip_call_id_hash;
 	__u8 proto;		/* L4 protocol, or IPPROTO_ANY */
 	__u8 scope;		/* LB_LOOKUP_SCOPE_* for externalTrafficPolicy=Local */
 	__u8 pad[2];
@@ -101,6 +104,8 @@ struct lb4_service {
 	 * slots under quarantine (otherwise zero).
 	 */
 	__u16 qcount;
+  __u8 sip_inspect;
+  __u8 pad[3];
 };
 
 struct lb4_backend {
@@ -176,6 +181,14 @@ struct lb6_src_range_key {
 	__u16 pad;
 	union v6addr addr;
 };
+
+struct lb4_pinning_key {
+  __u32 svc_ip;
+} __packed;
+
+struct lb4_pinning_val {
+  __u32 node_ip;
+} __packed;
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -322,13 +335,22 @@ struct {
 #endif /* OVERWRITE_MAGLEV_MAP_FROM_TEST */
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, struct lb_affinity_match);
-	__type(value, __u8);
-	__uint(pinning, LIBBPF_PIN_BY_NAME);
-	__uint(max_entries, CILIUM_LB_AFFINITY_MAP_MAX_ENTRIES);
-	__uint(map_flags, CONDITIONAL_PREALLOC);
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __type(key, struct lb_affinity_match);
+  __type(value, __u8);
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
+  __uint(max_entries, CILIUM_LB_AFFINITY_MAP_MAX_ENTRIES);
+  __uint(map_flags, CONDITIONAL_PREALLOC);
 } cilium_lb_affinity_match __section_maps_btf;
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, struct lb4_pinning_key);
+	__type(value, struct lb4_pinning_val);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);
+	__uint(max_entries, CILIUM_LB_PINNING_MAP_MAX_ENTRIES);
+	__uint(map_flags, CONDITIONAL_PREALLOC);
+} cilium_lb4_pinning __section_maps_btf;
 
 /* Lookup scope for externalTrafficPolicy=Local */
 #define LB_LOOKUP_SCOPE_EXT	0
@@ -1565,6 +1587,8 @@ lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo
 	tuple->nexthdr = ip4->protocol;
 	tuple->daddr = ip4->daddr;
 	tuple->saddr = ip4->saddr;
+  if(tuple->sip_call_id_hash > 0)
+    _printk("sip call id in a tuple: %x", tuple->sip_call_id_hash);
 
 	switch (tuple->nexthdr) {
 	case IPPROTO_TCP:

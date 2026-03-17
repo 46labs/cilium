@@ -595,12 +595,18 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
 	    bool *punt_to_stack __maybe_unused,
 	    __s8 *ext_err __maybe_unused)
 {
+ 	struct trace_ctx __maybe_unused trace = {
+		.reason = TRACE_REASON_UNKNOWN,
+		.monitor = TRACE_PAYLOAD_LEN,
+	};
 	struct ct_buffer4 __maybe_unused ct_buffer = {};
 	bool __maybe_unused need_hostfw = false;
 	bool __maybe_unused is_host_id = false;
 	void *data, *data_end;
 	struct iphdr *ip4;
 	fraginfo_t fraginfo __maybe_unused;
+  struct lb4_pinning_key pkey __maybe_unused;
+  struct lb4_pinning_val *val __maybe_unused;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -615,8 +621,46 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
 		return DROP_FRAG_NOSUPPORT;
 #endif
 
+  if (!from_host && ip4->protocol == IPPROTO_UDP) {
+    struct ipv4_ct_tuple tuple = {};
+
+    tuple.sip_call_id_hash = sip_inspect(ctx);
+    if (tuple.sip_call_id_hash == 0)
+      goto skip_egress;
+
+    tuple.nexthdr = ip4->protocol;
+    tuple.daddr = ip4->daddr;
+    tuple.saddr = ip4->saddr;
+    ct_buffer.l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
+    ct_buffer.ret = ct_lookup4(get_ct_map4(&tuple), &tuple, ctx, ip4, ct_buffer.l4_off,
+              CT_INGRESS, SCOPE_FORWARD, NULL, &ct_buffer.monitor);
+
+    // _printk("checking %x %x", tuple.saddr, tuple.daddr);
+    // _printk("sip %x", tuple.sip_call_id_hash);
+    // _printk("ret %d", ct_buffer.ret);
+    if (ct_buffer.ret == CT_ESTABLISHED) {
+      _printk("found udp session, skipping nodeport");
+      ctx_skip_nodeport_set(ctx);
+    }
+  }
+
+skip_egress:
+
 #ifdef ENABLE_NODEPORT
 	if (!from_host) {
+    pkey.svc_ip = ip4->daddr;
+    val = map_lookup_elem(&cilium_lb4_pinning, &pkey);
+    if (val) {
+      _printk("pinning found key %x val %x", pkey.svc_ip, val->node_ip);
+      struct remote_endpoint_info fake_info = {0};
+      fake_info.tunnel_endpoint.ip4 = val->node_ip;
+      fake_info.flag_has_tunnel_ep = true;
+      return __encap_and_redirect_with_nodeid(ctx, &fake_info,
+                secctx, WORLD_IPV4_ID,
+                WORLD_IPV4_ID, &trace,
+                bpf_htons(ETH_P_IP));
+    }
+
 		if (!ctx_skip_nodeport(ctx)) {
 			bool is_dsr = false;
 

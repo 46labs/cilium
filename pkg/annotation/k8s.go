@@ -137,6 +137,9 @@ const (
 	// - maglev
 	ServiceLoadBalancingAlgorithm = ServicePrefix + "/lb-algorithm"
 
+	// ServiceSipInspect indicates that sip-inspect should take place.
+	ServiceSipInspect = ServicePrefix + "/sip-inspect"
+
 	// ServiceNodeExposure is the label name used to mark a service to only a
 	// subset of the nodes which match the same value. For all other nodes, this
 	// service is ignored and not installed into their datapath.

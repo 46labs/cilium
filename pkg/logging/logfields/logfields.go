@@ -845,6 +845,9 @@ const (
 	// GatewayIP is the gateway IP used in a given egress policy
 	GatewayIP = "gatewayIP"
 
+	// Sip inspection
+	SipInspect = "sipInspect"
+
 	// Number of Backends failed while restoration.
 	RestoredBackends = "restoredBackends"
 

@@ -27,7 +27,7 @@
 
 					/* cb + RECIRC_MARKER + XFER_MARKER */
 #define META_PIVOT			((int)(field_sizeof(struct __sk_buff, cb) + \
-					       sizeof(__u32) * 2))
+					       sizeof(__u32) * 3))
 
 /* This must be a mask and all offsets guaranteed to be less than that. */
 #define __CTX_OFF_MAX			0xff

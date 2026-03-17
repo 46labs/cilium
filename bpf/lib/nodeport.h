@@ -27,6 +27,7 @@
 #include "proxy_hairpin.h"
 #include "fib.h"
 #include "srv6.h"
+#include "sip.h"
 
 DECLARE_CONFIG(bool, enable_no_service_endpoints_routable,
 	       "Enable routes when service has 0 endpoints")
@@ -2822,10 +2823,8 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 				return ret;
 #endif
 			}
-
 			return ret;
 		}
-
 		if (lb4_svc_is_l7_punt_proxy(svc) &&
 		    __lookup_ip4_endpoint(backend->address)) {
 			ctx_skip_nodeport_set(ctx);
@@ -2841,7 +2840,6 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 			ret = lb4_dnat_request(ctx, backend, l3_off, fraginfo,
 					       l4_off, key, tuple, false);
 	}
-
 	if (IS_ERR(ret))
 		return ret;
 
@@ -2869,7 +2867,6 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 #else
 		src_sec_identity = WORLD_IPV4_ID;
 #endif
-
 		/* lookup with SCOPE_FORWARD: */
 		__ipv4_ct_tuple_reverse(tuple);
 
@@ -2887,7 +2884,6 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		case CT_NEW:
 			ct_state.src_sec_id = src_sec_identity;
 			ct_state.node_port = 1;
-
 			ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
 					 CT_EGRESS, &ct_state, ext_err);
 			if (IS_ERR(ret))
@@ -2901,7 +2897,6 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		default:
 			return DROP_UNKNOWN_CT;
 		}
-
 		if (backend_local) {
 			ctx_set_xfer(ctx, XFER_PKT_NO_SVC);
 			return CTX_ACT_OK;
@@ -2971,10 +2966,19 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	lb4_fill_key(&key, &tuple);
 
 	svc = lb4_lookup_service(&key, false);
+
 	if (svc)
+  {
+    if(svc->sip_inspect) {
+      // _printk("nodeport_lb4 got a packet on a sip inspect annotation service");
+      tuple.sip_call_id_hash = sip_inspect(ctx);
+      // _printk("nodeport_lb4 sip call id hash: %x", tuple.sip_call_id_hash);
+    }
+
 		return nodeport_svc_lb4(ctx, &tuple, svc, &key, ip4, l3_off,
 					fraginfo, l4_off, src_sec_identity,
 					punt_to_stack, ext_err);
+  }
 
 skip_service_lookup:
 #ifdef ENABLE_NAT_46X64_GATEWAY

@@ -662,7 +662,7 @@ func (manager *Manager) updateEgressRules4() {
 			return
 		}
 
-		if err := manager.policyMap4.Update(endpointIP, dstCIDR, gwc.egressIP4, gatewayIP); err != nil {
+		if err := manager.policyMap4.Update(endpointIP, dstCIDR, gwc.egressIP4, gatewayIP, gwc.sipInspect); err != nil {
 			manager.logger.Error(
 				"Error applying IPv4 egress gateway policy",
 				logfields.Error, err,
