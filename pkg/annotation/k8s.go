@@ -140,6 +140,9 @@ const (
 	// ServiceSipInspect indicates that sip-inspect should take place.
 	ServiceSipInspect = ServicePrefix + "/sip-inspect"
 
+	// ServiceSipPinning indicates that sip-pinning should take place.
+	ServiceSipPinning = ServicePrefix + "/sip-pinning"
+
 	// ServiceNodeExposure is the label name used to mark a service to only a
 	// subset of the nodes which match the same value. For all other nodes, this
 	// service is ignored and not installed into their datapath.
