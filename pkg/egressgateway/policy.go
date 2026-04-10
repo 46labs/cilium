@@ -35,6 +35,7 @@ type policyGatewayConfig struct {
 	iface        string
 	egressIP     netip.Addr
 	sipInspect   bool
+	sipPinning   bool
 }
 
 // gatewayConfig is the gateway configuration derived at runtime from a policy.
@@ -61,6 +62,8 @@ type gatewayConfig struct {
 	localNodeConfiguredAsGateway bool
 	// sipInspect is used for SIP inspection on SNAT initiated
 	sipInspect bool
+	// sipPinning is used for dynamic egress gateway node selection based in SIP service pinning
+	sipPinning bool
 }
 
 // PolicyConfig is the internal representation of CiliumEgressGatewayPolicy.
@@ -77,6 +80,7 @@ type PolicyConfig struct {
 	matchedEndpoints  map[endpointID]*endpointMetadata
 	v6Needed          bool
 	sipInspect        bool
+	sipPinning        bool
 }
 
 // PolicyID includes policy name and namespace
@@ -120,8 +124,12 @@ func (config *PolicyConfig) updateMatchedEndpointIDs(epDataStore map[endpointID]
 	}
 }
 
-func (config *policyGatewayConfig) selectsNodeAsGateway(node nodeTypes.Node) bool {
-	return policyTypes.Matches(config.nodeSelector, labels.K8sSet(node.Labels))
+func (config *policyGatewayConfig) selectsNodeAsGateway(manager *Manager, node nodeTypes.Node) (bool, error) {
+	if config.sipPinning {
+		return manager.SelectsPinnedNodeAsGateway(node, config.egressIP)
+	}
+
+	return policyTypes.Matches(config.nodeSelector, labels.K8sSet(node.Labels)), nil
 }
 
 func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
@@ -138,7 +146,14 @@ func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
 
 		manager.logger.Info("Processing policy with egress IP", logfields.EgressIP, policyGwc.egressIP)
 		for _, node := range manager.nodes {
-			if !policyGwc.selectsNodeAsGateway(node) {
+			selected, err := policyGwc.selectsNodeAsGateway(manager, node)
+
+			if err != nil {
+				manager.logger.Error("failed to select node as gateway", "reason", err.Error())
+				continue
+			}
+
+			if !selected {
 				continue
 			}
 
@@ -160,6 +175,7 @@ func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
 						logfields.Interface, policyGwc.iface,
 						logfields.EgressIP, policyGwc.egressIP,
 						logfields.SipInspect, policyGwc.sipInspect,
+						logfields.SipPinning, policyGwc.sipPinning,
 					)
 				}
 			}
@@ -181,8 +197,13 @@ func (gwc *gatewayConfig) deriveFromPolicyGatewayConfig(logger *slog.Logger, gc 
 	gwc.egressIP4 = EgressIPNotFoundIPv4
 	gwc.egressIP6 = EgressIPNotFoundIPv6
 	gwc.sipInspect = gc.sipInspect
+	gwc.sipPinning = gc.sipPinning
 
-	logger.Info("Got a egw policy with egressIP", logfields.EgressIP, gc.egressIP, logfields.SipInspect, gc.sipInspect)
+	logger.Info("Got a egw policy with egressIP",
+		logfields.EgressIP, gc.egressIP,
+		logfields.SipInspect, gc.sipInspect,
+		logfields.SipPinning, gc.sipPinning,
+	)
 
 	switch {
 	case gc.iface != "":
@@ -311,7 +332,7 @@ func (config *PolicyConfig) forEachEndpointAndCIDR(f func(netip.Addr, netip.Pref
 	}
 }
 
-func parseEgressGateway(egressGateway *v2.EgressGateway, sipInspect bool) (*policyGatewayConfig, error) {
+func parseEgressGateway(egressGateway *v2.EgressGateway, sipInspect, sipPinning bool) (*policyGatewayConfig, error) {
 	if egressGateway == nil {
 		return nil, fmt.Errorf("egressGateway can't be empty")
 	}
@@ -324,6 +345,7 @@ func parseEgressGateway(egressGateway *v2.EgressGateway, sipInspect bool) (*poli
 		nodeSelector: policyTypes.NewLabelSelector(api.NewESFromK8sLabelSelector(labels.LabelSourceK8sKeyPrefix, egressGateway.NodeSelector)),
 		iface:        egressGateway.Interface,
 		sipInspect:   sipInspect,
+		sipPinning:   sipPinning,
 	}
 
 	// EgressIP is not a required field, validate and parse it only if non-empty
@@ -349,6 +371,7 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 	var policyGwConfigs []policyGatewayConfig
 	var v6Needed bool
 	var sipInspect = false
+	var sipPinning = false
 
 	allowAllNamespacesRequirement := slim_metav1.LabelSelectorRequirement{
 		Key:      k8sConst.PodNamespaceLabel,
@@ -364,13 +387,17 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		sipInspect = true
 	}
 
+	if _, ret := cegp.Annotations[annotation.ServiceSipPinning]; ret {
+		sipPinning = true
+	}
+
 	destinationCIDRs := cegp.Spec.DestinationCIDRs
 	if destinationCIDRs == nil {
 		return nil, fmt.Errorf("destinationCIDRs can't be empty")
 	}
 
 	for _, egressGateway := range cegp.Spec.EgressGateways {
-		policyGwc, err := parseEgressGateway(&egressGateway, sipInspect)
+		policyGwc, err := parseEgressGateway(&egressGateway, sipInspect, sipPinning)
 		if err != nil {
 			return nil, err
 		}
@@ -380,7 +407,7 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 	// If there are any elements in EgressGateways skip the EgressGateway field.
 	if len(policyGwConfigs) == 0 {
 		egressGateway := cegp.Spec.EgressGateway
-		policyGwc, err := parseEgressGateway(egressGateway, sipInspect)
+		policyGwc, err := parseEgressGateway(egressGateway, sipInspect, sipPinning)
 		if err != nil {
 			return nil, err
 		}
@@ -457,6 +484,7 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		policyGwConfigs:   policyGwConfigs,
 		v6Needed:          v6Needed,
 		sipInspect:        sipInspect,
+		sipPinning:        sipPinning,
 		id: types.NamespacedName{
 			Name: name,
 		},

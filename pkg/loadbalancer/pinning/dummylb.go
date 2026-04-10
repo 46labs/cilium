@@ -39,7 +39,6 @@ func rebalanceServices(
 			return err
 		}
 
-		println("nodesCount", nodesCount, "i", i, "nodes[i]", string(nodes[i]), "excludeNodeIp", string(excludeNodeIp))
 		if nodes[i] != excludeNodeIp {
 			m[ip] = nodes[i]
 		}

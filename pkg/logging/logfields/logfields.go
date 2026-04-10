@@ -848,6 +848,9 @@ const (
 	// Sip inspection
 	SipInspect = "sipInspect"
 
+	// Sip pinning
+	SipPinning = "sipPinning"
+
 	// Number of Backends failed while restoration.
 	RestoredBackends = "restoredBackends"
 

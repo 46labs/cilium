@@ -11,48 +11,9 @@ import (
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	lbmaps "github.com/cilium/cilium/pkg/loadbalancer/maps"
 	"github.com/cilium/cilium/pkg/node"
-	"github.com/cilium/cilium/pkg/types"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
 )
-
-// func fromPinningMap(pmap pinningMap) simplePinningMap {
-// 	m := simplePinningMap{}
-
-// 	for k, v := range pmap {
-// 		m[serviceIp(k.ServiceIP.String())] = nodeIp(v.NodeIP.String())
-// 	}
-
-// 	return m
-// }
-
-func (that simplePinningMap) toPinningMap() (pinningMap, error) {
-	m := pinningMap{}
-
-	for serviceIp, nodeIp := range that {
-		sIpAddr, err := netip.ParseAddr(string(serviceIp))
-
-		if err != nil {
-			return nil, err
-		}
-
-		sIp := &types.IPv4{}
-		sIp.FromAddr(sIpAddr)
-
-		nIpAddr, err := netip.ParseAddr(string(nodeIp))
-
-		if err != nil {
-			return nil, err
-		}
-
-		nIp := &types.IPv4{}
-		nIp.FromAddr(nIpAddr)
-
-		m[&lbmaps.LbPinning4Key{ServiceIP: *sIp}] = &lbmaps.LbPinning4Value{NodeIP: *nIp}
-	}
-
-	return m, nil
-}
 
 type PinningParams struct {
 	cell.In
@@ -89,18 +50,6 @@ func newPinningManager(params PinningParams) *PinningManager {
 		servicesCache:    servicesMap{},
 		servicePinner:    dummyLbPinning{},
 	}
-}
-
-func (pm *PinningManager) dumpPinningMap() (*pinningMap, error) {
-	m := pinningMap{}
-
-	if err := pm.lBMaps.DumpPinning4(func(lpk *lbmaps.LbPinning4Key, lpv *lbmaps.LbPinning4Value) {
-		m[lpk] = lpv
-	}); err != nil {
-		return nil, err
-	}
-
-	return &m, nil
 }
 
 func isPinnedService(svc *slim_corev1.Service) bool {
@@ -205,7 +154,7 @@ func (pm *PinningManager) handleNodeEvent(ctx context.Context, event resource.Ev
 }
 
 func (pm *PinningManager) applyPinningMap(desiredPinningMap simplePinningMap) error {
-	current, err := pm.dumpPinningMap()
+	current, err := DumpPinningMap(pm.lBMaps)
 
 	if err != nil {
 		return err

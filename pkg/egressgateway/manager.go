@@ -29,6 +29,8 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	k8sTypes "github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/labels"
+	lbmaps "github.com/cilium/cilium/pkg/loadbalancer/maps"
+	lbpinning "github.com/cilium/cilium/pkg/loadbalancer/pinning"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/egressmap"
@@ -112,6 +114,9 @@ type Manager struct {
 	// nodes stores nodes sorted by their name. The entries are sorted
 	// to ensure consistent gateway selection across all agents.
 	nodes []nodeTypes.Node
+
+	lBMaps lbmaps.LBMaps
+
 	// nodesAddresses2Labels store the labels of each node so that the endpoint can match the node labels
 	// key is the IP address of the node, and value is the labels of the node.
 	nodesAddresses2Labels map[string]map[string]string
@@ -173,6 +178,7 @@ type Params struct {
 	PolicyMap6        *egressmap.PolicyMap6
 	Policies          resource.Resource[*Policy]
 	Nodes             resource.Resource[*cilium_api_v2.CiliumNode]
+	LBMaps            lbmaps.LBMaps
 	Endpoints         resource.Resource[*k8sTypes.CiliumEndpoint]
 	Sysctl            sysctl.Sysctl
 
@@ -236,6 +242,7 @@ func newEgressGatewayManager(p Params) (*Manager, error) {
 		policyMap6:                    p.PolicyMap6,
 		policies:                      p.Policies,
 		ciliumNodes:                   p.Nodes,
+		lBMaps:                        p.LBMaps,
 		endpoints:                     p.Endpoints,
 		sysctl:                        p.Sysctl,
 		nodesAddresses2Labels:         make(map[string]map[string]string),
@@ -830,4 +837,25 @@ func (manager *Manager) reconcileLocked() {
 	manager.eventsBitmap = 0
 
 	manager.reconciliationEventsCount.Add(1)
+}
+
+func (manager *Manager) SelectsPinnedNodeAsGateway(node nodeTypes.Node, egressIP netip.Addr) (bool, error) {
+	nodeIp := node.GetNodeIP(false)
+
+	pm, err := lbpinning.DumpPinningMap(manager.lBMaps)
+
+	if err != nil {
+		return false, err
+	}
+
+	for serviceIp, pinnedNodeIp := range *pm {
+		if serviceIp != nil && pinnedNodeIp != nil &&
+			serviceIp.ServiceIP.Addr() == egressIP &&
+			pinnedNodeIp.NodeIP.String() == nodeIp.String() {
+
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
