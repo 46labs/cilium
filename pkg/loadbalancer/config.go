@@ -51,6 +51,9 @@ const (
 	// entries.
 	LBSockRevNatEntriesName = "bpf-sock-rev-map-max"
 
+	// LBPinningEntriesName is the maximum number of pinned lb mappings
+	LBPinningEntriesName = "bpf-lb-pinning-max"
+
 	// NodePortRange defines a custom range where to look up NodePort services
 	NodePortRange = "node-port-range"
 
@@ -164,6 +167,9 @@ type UserConfig struct {
 	// LBSockRevNatEntries is the maximum number of sock rev nat mappings
 	// allowed in the BPF rev nat table
 	LBSockRevNatEntries int `mapstructure:"bpf-sock-rev-map-max"`
+
+	// LBPinningEntries is the maximum number of pinned lb mappings
+	LBPinningEntries int `mapstructure:"bpf-lb-pinning-max"`
 
 	// NodePortRange is the minimum and maximum ports to use for NodePort
 	NodePortRange []string
@@ -310,6 +316,8 @@ func (def UserConfig) Flags(flags *pflag.FlagSet) {
 
 	flags.Int(LBSockRevNatEntriesName, def.LBSockRevNatEntries, "Maximum number of entries for the SockRevNAT BPF map")
 
+	flags.Int(LBPinningEntriesName, def.LBPinningEntries, "Maximum number of entries for the service pinning BPF map")
+
 	flags.StringSlice(NodePortRange, []string{fmt.Sprintf("%d", NodePortMinDefault), fmt.Sprintf("%d", NodePortMaxDefault)}, "Set the min/max NodePort port range")
 
 	flags.String(LBAlgorithmName, def.LBAlgorithm, "BPF load balancing algorithm (\"random\", \"maglev\")")
@@ -369,6 +377,10 @@ func NewConfig(log *slog.Logger, userConfig UserConfig, deprecatedConfig Depreca
 		getEntries := dcfg.GetDynamicSizeCalculator(log)
 		cfg.LBSockRevNatEntries = getEntries(option.SockRevNATMapEntriesDefault, option.LimitTableAutoSockRevNatMin, option.LimitTableMax)
 		log.Info(fmt.Sprintf("option %s set by dynamic sizing to %v", LBSockRevNatEntriesName, cfg.LBSockRevNatEntries)) // FIXME
+	}
+
+	if cfg.LBPinningEntries == 0 {
+		cfg.LBPinningEntries = option.PinningMapEntriesDefault
 	}
 
 	cfg.LBSockRevNatEntries = dcfg.AlignMapSizeForLRU(log, LBSockRevNatEntriesName, cfg.LBSockRevNatEntries)
@@ -489,6 +501,8 @@ var DefaultUserConfig = UserConfig{
 	LBMaglevMapEntries:      0, // ...
 
 	LBSockRevNatEntries: 0, // Probes for suitable size if zero
+
+	LBPinningEntries: 0,
 
 	LBSourceRangeAllTypes:    false,
 	LBSockTerminateAllProtos: false,

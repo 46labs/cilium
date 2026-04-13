@@ -85,6 +85,7 @@ func RunBenchmark(testSize int, iterations int, loglevel slog.Level, validate bo
 					LBSourceRangeMapEntries: 3 * testSize,
 					LBMaglevMapEntries:      3 * testSize,
 					LBSockRevNatEntries:     3 * testSize,
+					LBPinningEntries:        3 * testSize,
 				},
 				NodePortMin: loadbalancer.NodePortMinDefault,
 				NodePortMax: loadbalancer.NodePortMaxDefault,

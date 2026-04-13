@@ -599,12 +599,18 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
 	    bool *punt_to_stack __maybe_unused,
 	    __s8 *ext_err __maybe_unused)
 {
+	struct trace_ctx __maybe_unused trace = {
+		.reason = TRACE_REASON_UNKNOWN,
+		.monitor = TRACE_PAYLOAD_LEN,
+	};
 	struct ct_buffer4 __maybe_unused ct_buffer = {};
 	bool __maybe_unused need_hostfw = false;
 	bool __maybe_unused is_host_id = false;
 	void *data, *data_end;
 	struct iphdr *ip4;
 	fraginfo_t fraginfo __maybe_unused;
+	struct lb4_pinning_key pkey __maybe_unused;
+	struct lb4_pinning_val *val __maybe_unused;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -621,6 +627,20 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
 
 #ifdef ENABLE_NODEPORT
 	if (!from_host) {
+#ifdef TUNNEL_MODE
+		pkey.svc_ip = ip4->daddr;
+		val = map_lookup_elem(&cilium_lb4_pinning, &pkey);
+		if (val) {
+			struct remote_endpoint_info fake_info = {0};
+			fake_info.tunnel_endpoint.ip4 = val->node_ip;
+			fake_info.flag_has_tunnel_ep = true;
+			return __encap_and_redirect_with_nodeid(ctx, &fake_info,
+							       secctx, WORLD_IPV4_ID,
+							       WORLD_IPV4_ID, &trace,
+							       bpf_htons(ETH_P_IP));
+		}
+#endif /* TUNNEL_MODE */
+
 		if (!ctx_skip_nodeport(ctx)) {
 			bool is_dsr = false;
 
