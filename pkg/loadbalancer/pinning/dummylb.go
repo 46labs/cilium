@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
 package pinning
 
 import (
-	"encoding/binary"
+	"hash/fnv"
 	"maps"
 	"net/netip"
 	"slices"
@@ -9,19 +12,41 @@ import (
 
 type dummyLbPinning struct{}
 
-func calcNodeIndex(serviceIp string, nodeCount uint32) (int, error) {
-	ipAddr, err := netip.ParseAddr(serviceIp)
+func parseIps[T ~string](ips []T) ([]netip.Addr, error) {
+	sortedIps := []netip.Addr{}
 
-	if err != nil {
-		return -1, err
+	for _, ip := range ips {
+		ipAddr, err := netip.ParseAddr(string(ip))
+
+		if err != nil {
+			return sortedIps, err
+		}
+
+		sortedIps = append(sortedIps, ipAddr)
 	}
 
-	fourBytes := ipAddr.As4()
+	return sortedIps, nil
+}
 
-	n := binary.BigEndian.Uint32(fourBytes[:])
-	i := n % nodeCount
+func parseAndSortIps[T ~string](ips []T) ([]netip.Addr, error) {
+	sortedIps, err := parseIps(ips)
 
-	return int(i), nil
+	if err != nil {
+		return sortedIps, nil
+	}
+
+	slices.SortFunc(sortedIps, func(a, b netip.Addr) int {
+		return a.Compare(b)
+	})
+
+	return sortedIps, nil
+}
+
+func calcNodeIndex(ipAddr netip.Addr, nodeCount uint32) int {
+	h := fnv.New32a()
+	h.Write(ipAddr.AsSlice())
+
+	return int(h.Sum32() % nodeCount)
 }
 
 func rebalanceServices(
@@ -32,15 +57,25 @@ func rebalanceServices(
 ) error {
 	nodesCount := len(nodes)
 
-	for _, ip := range services {
-		i, err := calcNodeIndex(string(ip), uint32(nodesCount))
+	serviceIps, err := parseIps(slices.Collect(maps.Values(services)))
 
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return err
+	}
 
-		if nodes[i] != excludeNodeIp {
-			m[ip] = nodes[i]
+	nodeIps, err := parseAndSortIps(nodes)
+
+	if err != nil {
+		return err
+	}
+
+	for _, ip := range serviceIps {
+		i := calcNodeIndex(ip, uint32(nodesCount))
+
+		nodeip := nodeIp(nodeIps[i].String())
+
+		if nodeip != excludeNodeIp {
+			m[serviceIp(ip.String())] = nodeip
 		}
 	}
 

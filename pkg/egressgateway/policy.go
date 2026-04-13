@@ -149,7 +149,7 @@ func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
 			selected, err := policyGwc.selectsNodeAsGateway(manager, node)
 
 			if err != nil {
-				manager.logger.Error("failed to select node as gateway", "reason", err.Error())
+				manager.logger.Error("failed to select node as gateway", logfields.Error, err)
 				continue
 			}
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
 package pinning
 
 import (
@@ -54,3 +57,5 @@ type servicePinner interface {
 		newNodes map[string]nodeIp,
 	) (simplePinningMap, error)
 }
+
+type LbPinMapUpdateEvent struct{}

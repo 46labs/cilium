@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
 package pinning
 
 import (
@@ -10,6 +13,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	lbmaps "github.com/cilium/cilium/pkg/loadbalancer/maps"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
@@ -17,38 +21,40 @@ import (
 
 type PinningParams struct {
 	cell.In
-	JobGroup       job.Group
-	Logger         *slog.Logger
-	Services       resource.Resource[*slim_corev1.Service]
-	Nodes          resource.Resource[*slim_corev1.Node]
-	LocalNodeStore *node.LocalNodeStore
-	LBMaps         lbmaps.LBMaps
+	JobGroup           job.Group
+	Logger             *slog.Logger
+	Services           resource.Resource[*slim_corev1.Service]
+	Nodes              resource.Resource[*slim_corev1.Node]
+	LocalNodeStore     *node.LocalNodeStore
+	LBMaps             lbmaps.LBMaps
+	PinMapUpdateStream *lbPinMapEventStream
 }
 
 type PinningManager struct {
-	trigger          job.Trigger
-	logger           *slog.Logger
-	services         resource.Resource[*slim_corev1.Service]
-	nodes            resource.Resource[*slim_corev1.Node]
-	localNodeStore   *node.LocalNodeStore
-	lBMaps           lbmaps.LBMaps
-	reconcileChannel chan reconcileUpdate
-	nodesCache       nodesMap
-	servicesCache    servicesMap
-	servicePinner    servicePinner
+	logger                  *slog.Logger
+	services                resource.Resource[*slim_corev1.Service]
+	nodes                   resource.Resource[*slim_corev1.Node]
+	localNodeStore          *node.LocalNodeStore
+	lBMaps                  lbmaps.LBMaps
+	reconcileChannel        chan reconcileUpdate
+	nodesCache              nodesMap
+	servicesCache           servicesMap
+	servicePinner           servicePinner
+	pinMapUpdateEventStream *lbPinMapEventStream
 }
 
 func newPinningManager(params PinningParams) *PinningManager {
 	return &PinningManager{
-		logger:           params.Logger,
-		services:         params.Services,
-		nodes:            params.Nodes,
-		lBMaps:           params.LBMaps,
-		localNodeStore:   params.LocalNodeStore,
-		reconcileChannel: make(chan reconcileUpdate),
-		nodesCache:       nodesMap{},
-		servicesCache:    servicesMap{},
-		servicePinner:    dummyLbPinning{},
+		logger:                  params.Logger,
+		services:                params.Services,
+		nodes:                   params.Nodes,
+		lBMaps:                  params.LBMaps,
+		localNodeStore:          params.LocalNodeStore,
+		reconcileChannel:        make(chan reconcileUpdate),
+		nodesCache:              nodesMap{},
+		servicesCache:           servicesMap{},
+		servicePinner:           dummyLbPinning{},
+		pinMapUpdateEventStream: params.PinMapUpdateStream,
 	}
 }
 
@@ -128,7 +134,7 @@ func (pm *PinningManager) handleNodeEvent(ctx context.Context, event resource.Ev
 		}
 
 		if nodeIp == "" {
-			pm.logger.Error("IP has not found for", "node", event.Key.Name)
+			pm.logger.Error("IP has not found for", logfields.NodeName, event.Key.Name)
 			return eventDone(event, nil)
 		}
 
@@ -188,6 +194,8 @@ func (pm *PinningManager) reconcileLoop(ctx context.Context, health cell.Health)
 		return err
 	}
 
+	defer pm.pinMapUpdateEventStream.complete(err)
+
 	localNodeIp := localNode.GetNodeIP(false).String()
 
 	for {
@@ -220,17 +228,20 @@ func (pm *PinningManager) reconcileLoop(ctx context.Context, health cell.Health)
 			)
 
 			if err != nil {
-				pm.logger.Error("error making desired pinning map", "reason", err)
+				pm.logger.Error("error making desired pinning map", logfields.Error, err)
 				continue
 			}
 
 			if err := pm.applyPinningMap(desiredPinningMap); err != nil {
-				pm.logger.Error("error applying desired pinning map", "reason", err)
+				pm.logger.Error("error applying desired pinning map", logfields.Error, err)
 				continue
 			}
 
+			pm.pinMapUpdateEventStream.emitter(LbPinMapUpdateEvent{})
+
 		case <-ctx.Done():
 			// graceful shutdown
+			pm.pinMapUpdateEventStream.complete(nil)
 			return nil
 		}
 	}

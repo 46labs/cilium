@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
 package pinning
 
 import (
@@ -10,5 +13,8 @@ var Cell = cell.Module(
 	"Pins a service to a node according to specified rules",
 	cell.Provide(k8s.ServiceResource),
 	cell.Provide(k8s.NodeResource),
+
+	cell.ProvidePrivate(newLbPinMapEventStream),
+	cell.Provide(newLbPinMapEventObservable),
 	cell.Invoke(registerPinningManager),
 )

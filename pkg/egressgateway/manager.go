@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/stream"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
@@ -83,6 +84,7 @@ const (
 	eventDeleteEndpoint
 	eventUpdateNode
 	eventDeleteNode
+	eventLbPinMapUpdate
 )
 
 type Config struct {
@@ -115,7 +117,11 @@ type Manager struct {
 	// to ensure consistent gateway selection across all agents.
 	nodes []nodeTypes.Node
 
+	// load balancing pinning map interface (get, set, etc.)
 	lBMaps lbmaps.LBMaps
+
+	// load balancing pinning map update events
+	lbPinMapEvents lbpinning.ObservableLbPinMapUpdateEvent
 
 	// nodesAddresses2Labels store the labels of each node so that the endpoint can match the node labels
 	// key is the IP address of the node, and value is the labels of the node.
@@ -179,6 +185,7 @@ type Params struct {
 	Policies          resource.Resource[*Policy]
 	Nodes             resource.Resource[*cilium_api_v2.CiliumNode]
 	LBMaps            lbmaps.LBMaps
+	LbPinMapEvents    lbpinning.ObservableLbPinMapUpdateEvent
 	Endpoints         resource.Resource[*k8sTypes.CiliumEndpoint]
 	Sysctl            sysctl.Sysctl
 
@@ -243,6 +250,7 @@ func newEgressGatewayManager(p Params) (*Manager, error) {
 		policies:                      p.Policies,
 		ciliumNodes:                   p.Nodes,
 		lBMaps:                        p.LBMaps,
+		lbPinMapEvents:                p.LbPinMapEvents,
 		endpoints:                     p.Endpoints,
 		sysctl:                        p.Sysctl,
 		nodesAddresses2Labels:         make(map[string]map[string]string),
@@ -353,6 +361,7 @@ func (manager *Manager) processEvents(ctx context.Context) {
 	policyEvents := manager.policies.Events(ctx)
 	nodeEvents := manager.ciliumNodes.Events(ctx)
 	endpointEvents := manager.endpoints.Events(ctx, resource.WithRateLimiter(endpointsRateLimit))
+	lbPinMapUpdates := stream.ToChannel(ctx, manager.lbPinMapEvents)
 
 	for {
 		select {
@@ -385,6 +394,9 @@ func (manager *Manager) processEvents(ctx context.Context) {
 			} else {
 				manager.handleEndpointEvent(event)
 			}
+
+		case event := <-lbPinMapUpdates:
+			manager.handleLbPinMapEvent(event)
 		}
 	}
 }
@@ -548,6 +560,14 @@ func (manager *Manager) handleEndpointEvent(event resource.Event[*k8sTypes.Ciliu
 		manager.deleteEndpoint(endpoint)
 		event.Done(nil)
 	}
+}
+
+func (manager *Manager) handleLbPinMapEvent(_ lbpinning.LbPinMapUpdateEvent) {
+	manager.Lock()
+	defer manager.Unlock()
+
+	manager.setEventBitmap(eventLbPinMapUpdate)
+	manager.reconciliationTrigger.TriggerWithReason("LB pinning map update")
 }
 
 // handleNodeEvent takes care of node upserts and removals.
@@ -808,7 +828,7 @@ func (manager *Manager) reconcileLocked() {
 		manager.updatePoliciesMatchedEndpointIDs()
 	}
 
-	if manager.eventBitmapIsSet(eventK8sSyncDone, eventAddPolicy, eventDeletePolicy, eventUpdateNode, eventDeleteNode) {
+	if manager.eventBitmapIsSet(eventK8sSyncDone, eventAddPolicy, eventDeletePolicy, eventUpdateNode, eventDeleteNode, eventLbPinMapUpdate) {
 		manager.regenerateGatewayConfigs()
 
 		// Sysctl updates are handled by a reconciler, with the initial update attempting to wait some time
