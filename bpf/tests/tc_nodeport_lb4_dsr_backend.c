@@ -246,7 +246,7 @@ int nodeport_dsr_backend_check(struct __ctx_buff *ctx)
 	if (l4->check != bpf_htons(0x3771))
 		test_fatal("L4 checksum is invalid: %x != %x", l4->check, bpf_htons(0x3771));
 
-	struct ipv4_ct_tuple tuple;
+	struct ipv4_ct_tuple tuple = {};
 	struct ct_entry *ct_entry;
 	int l3_off, l4_off, ret;
 
@@ -552,7 +552,7 @@ int nodeport_dsr_backend_redirect_check(struct __ctx_buff *ctx)
 	if (l4->check != bpf_htons(0x2c70))
 		test_fatal("L4 checksum is invalid: %x != %x", l4->check, bpf_htons(0x2c70));
 
-	struct ipv4_ct_tuple tuple;
+	struct ipv4_ct_tuple tuple = {};
 	struct ct_entry *ct_entry;
 	int l3_off, l4_off, ret;
 
