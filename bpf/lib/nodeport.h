@@ -27,6 +27,7 @@
 #include "proxy_hairpin.h"
 #include "fib.h"
 #include "srv6.h"
+#include "sip.h"
 
 DECLARE_CONFIG(bool, enable_no_service_endpoints_routable,
 	       "Enable routes when service has 0 endpoints")
@@ -545,7 +546,7 @@ nodeport_extract_dsr_v6(struct __ctx_buff *ctx,
 			const struct ipv6_ct_tuple *tuple, int l4_off,
 			union v6addr *addr, __be16 *port, bool *dsr)
 {
-	struct ipv6_ct_tuple tmp = *tuple;
+	struct ipv6_ct_tuple tmp __align_stack_8 = *tuple;
 
 	if (tuple->nexthdr == IPPROTO_TCP) {
 		union tcp_flags tcp_flags = {};
@@ -1954,7 +1955,7 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 			const struct ipv4_ct_tuple *tuple, int l4_off,
 			__be32 *addr, __be16 *port, bool *dsr)
 {
-	struct ipv4_ct_tuple tmp = *tuple;
+	struct ipv4_ct_tuple tmp __align_stack_8 = *tuple;
 
 	/* Parse DSR info from the packet, to get the addr/port of the
 	 * addressed service. We need this for RevDNATing the backend's replies.
@@ -2927,7 +2928,7 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 			return DROP_UNKNOWN_CT;
 		}
 
-		if (backend_local) {
+		if (backend_local || svc->sip_inspect) {
 			ctx_set_xfer(ctx, XFER_PKT_NO_SVC);
 			return CTX_ACT_OK;
 		}
@@ -2980,6 +2981,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	fraginfo = ipfrag_encode_ipv4(ip4);
 	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
+	tuple.sip_call_id_hash = sip_inspect(ctx);
 	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
@@ -2996,10 +2998,26 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	lb4_fill_key(&key, &tuple);
 
 	svc = lb4_lookup_service(&key, false);
-	if (svc)
+
+	if (svc) {
+		if (svc->sip_inspect) {
+#ifdef ENABLE_MASQUERADE_IPV4
+			if (tuple.sip_call_id_hash) {
+				struct ipv4_nat_entry *state = NULL;
+				tuple.flags = TUPLE_F_IN;
+
+				state = snat_v4_lookup(&tuple);
+				if (state != NULL) {
+					return tail_call_internal(ctx, CILIUM_CALL_IPV4_NODEPORT_NAT_INGRESS, ext_err);
+				}
+			}
+#endif
+		}
+
 		return nodeport_svc_lb4(ctx, &tuple, svc, &key, ip4, l3_off,
 					fraginfo, l4_off, src_sec_identity,
 					punt_to_stack, ext_err);
+	}
 
 skip_service_lookup:
 #ifdef ENABLE_NAT_46X64_GATEWAY

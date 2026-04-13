@@ -405,8 +405,11 @@ struct ipv6_ct_tuple {
 	 */
 	__be16		dport;
 	__be16		sport;
+	__u32		sip_call_id_hash;
 	__u8		nexthdr;
 	__u8		flags;
+	__u8		pad0;
+	__u8		pad1;
 } __packed;
 
 struct ipv4_ct_tuple {
@@ -420,8 +423,11 @@ struct ipv4_ct_tuple {
 	 */
 	__be16		dport;
 	__be16		sport;
+	__u32		sip_call_id_hash;
 	__u8		nexthdr;
 	__u8		flags;
+	__u8		pad0;
+	__u8		pad1;
 } __packed;
 
 struct lb6_reverse_nat {

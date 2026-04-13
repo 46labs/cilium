@@ -70,8 +70,8 @@ static __always_inline bool ct_state_is_from_l7lb(const struct ct_state *ct_stat
 }
 
 struct ct_buffer4 {
-	struct ipv4_ct_tuple tuple;
-	struct ct_state ct_state;
+	struct ipv4_ct_tuple __attribute__((aligned(8))) tuple;
+	struct ct_state ct_state __attribute__((aligned(8)));
 	__u32 monitor;
 	int ret;
 	int l4_off;
@@ -79,7 +79,7 @@ struct ct_buffer4 {
 
 struct ct_buffer6 {
 	struct ipv6_ct_tuple tuple;
-	struct ct_state ct_state;
+	struct ct_state ct_state __attribute__((aligned(8)));
 	__u32 monitor;
 	int ret;
 	int l4_off;
@@ -108,7 +108,7 @@ struct ct_entry {
 	      proxy_redirect:1,	/* Connection is redirected to a proxy */
 	      dsr_internal:1,	/* DSR is k8s service related, cluster internal */
 	      from_l7lb:1,	/* Connection is originated from an L7 LB proxy */
-	      reserved2:1,	/* unused since v1.14 */
+	      is_sip:1,	/* This session is UDP-based SIP call */
 	      from_tunnel:1,	/* Connection is over tunnel */
 	      reserved3:5;
 	__u16 rev_nat_index;
@@ -257,6 +257,9 @@ static __always_inline __u32 ct_update_timeout(struct ct_entry *entry,
 		} else {
 			lifetime = bpf_sec_to_mono(CT_SYN_TIMEOUT);
 		}
+	}
+	if (entry->is_sip) {
+		lifetime = bpf_sec_to_mono(CT_SIP_SESSION_LIFETIME);
 	}
 
 	return __ct_update_timeout(entry, lifetime, dir, seen_flags,
@@ -789,7 +792,7 @@ ipv4_extract_tuple(struct __ctx_buff *ctx, struct ipv4_ct_tuple *tuple)
 	tuple->saddr = ip4->saddr;
 
 	return ipv4_load_l4_ports(ctx, ip4, fraginfo, ETH_HLEN + ipv4_hdrlen(ip4),
-				  CT_EGRESS, &tuple->dport);
+				  CT_EGRESS, &tuple->dport, &tuple->sip_call_id_hash);
 }
 
 static __always_inline void ct_flip_tuple_dir4(struct ipv4_ct_tuple *tuple)
@@ -910,7 +913,7 @@ ct_extract_ports4(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo
 	case IPPROTO_SCTP:
 #endif  /* ENABLE_SCTP */
 		return ipv4_load_l4_ports(ctx, ip4, fraginfo, off,
-					  dir, &tuple->dport);
+					  dir, &tuple->dport, &tuple->sip_call_id_hash);
 	default:
 		/* Traffic is allowed/dropped based on user-defined policies. */
 		if (CONFIG(enable_extended_ip_protocols)) {
@@ -1144,6 +1147,8 @@ static __always_inline int ct_create4(const void *map_main,
 
 	if (ct_state)
 		ct_create_fill_entry(&entry, ct_state, dir);
+
+	entry.is_sip = tuple->sip_call_id_hash > 0;
 
 	seen_flags.value |= is_tcp ? TCP_FLAG_SYN : 0;
 	ct_update_timeout(&entry, is_tcp, dir, seen_flags);

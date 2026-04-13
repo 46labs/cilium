@@ -726,6 +726,7 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
 
+#ifdef TUNNEL_MODE
 	struct crap_key key;
 	struct crap_value *tv;
 
