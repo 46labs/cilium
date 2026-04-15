@@ -37,6 +37,7 @@ type policyGatewayConfig struct {
 	egressIP     netip.Addr
 	sipPort      uint16
 	sipInspect   bool
+	svcPinning   bool
 }
 
 // gatewayConfig is the gateway configuration derived at runtime from a policy.
@@ -65,6 +66,8 @@ type gatewayConfig struct {
 	sipInspect bool
 	// sipPort is used as source port for SIP UDP packets
 	sipPort uint16
+	// svcPinning is used for dynamic egress gateway node selection based on service pinning
+	svcPinning bool
 }
 
 // PolicyConfig is the internal representation of CiliumEgressGatewayPolicy.
@@ -125,8 +128,12 @@ func (config *PolicyConfig) updateMatchedEndpointIDs(epDataStore map[endpointID]
 	}
 }
 
-func (config *policyGatewayConfig) selectsNodeAsGateway(node nodeTypes.Node) bool {
-	return policyTypes.Matches(config.nodeSelector, labels.K8sSet(node.Labels))
+func (config *policyGatewayConfig) selectsNodeAsGateway(manager *Manager, node nodeTypes.Node) (bool, error) {
+	if config.svcPinning {
+		return manager.SelectsPinnedNodeAsGateway(node, config.egressIP)
+	}
+
+	return policyTypes.Matches(config.nodeSelector, labels.K8sSet(node.Labels)), nil
 }
 
 func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
@@ -136,19 +143,36 @@ func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
 
 	for _, policyGwc := range config.policyGwConfigs {
 		gwc := gatewayConfig{
-			egressIP4: netip.IPv4Unspecified(),
-			egressIP6: netip.IPv6Unspecified(),
-			gatewayIP: GatewayNotFoundIPv4,
+			egressIP4:  netip.IPv4Unspecified(),
+			egressIP6:  netip.IPv6Unspecified(),
+			gatewayIP:  GatewayNotFoundIPv4,
+			sipInspect: policyGwc.sipInspect,
+			sipPort:    policyGwc.sipPort,
+			svcPinning: policyGwc.svcPinning,
+		}
+
+		if policyGwc.svcPinning && policyGwc.egressIP.Is4() {
+			gwc.egressIP4 = policyGwc.egressIP
 		}
 
 		manager.logger.Debug("Processing policy with egress IP", logfields.EgressIP, policyGwc.egressIP)
 		for _, node := range manager.nodes {
-			if !policyGwc.selectsNodeAsGateway(node) {
+			selected, err := policyGwc.selectsNodeAsGateway(manager, node)
+
+			if err != nil {
+				manager.logger.Error("failed to select node as gateway", logfields.Error, err.Error())
+				continue
+			}
+
+			if !selected {
 				continue
 			}
 
 			addr, ok := netipx.FromStdIP(node.GetNodeIP(false))
-			manager.logger.Debug("addr and ok", logfields.Address, addr, logfields.Result, ok)
+			manager.logger.Debug("addr and ok",
+				logfields.Address, addr,
+				logfields.Result, ok,
+			)
 			if !ok {
 				continue
 			}
@@ -166,6 +190,7 @@ func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
 						logfields.EgressIP, policyGwc.egressIP,
 						logfields.SipInspect, policyGwc.sipInspect,
 						logfields.SipPort, policyGwc.sipPort,
+						logfields.SvcPinning, policyGwc.svcPinning,
 					)
 				}
 			}
@@ -200,8 +225,14 @@ func (gwc *gatewayConfig) deriveFromPolicyGatewayConfig(logger *slog.Logger, gc 
 	gwc.egressIP6 = EgressIPNotFoundIPv6
 	gwc.sipInspect = gc.sipInspect
 	gwc.sipPort = gc.sipPort
+	gwc.svcPinning = gc.svcPinning
 
-	logger.Debug("Got a egw policy with egressIP", logfields.EgressIP, gc.egressIP, logfields.SipInspect, gc.sipInspect, logfields.SipPort, gc.sipPort)
+	logger.Debug("Got a egw policy with egressIP",
+		logfields.EgressIP, gc.egressIP,
+		logfields.SipInspect, gc.sipInspect,
+		logfields.SipPort, gc.sipPort,
+		logfields.SvcPinning, gc.svcPinning,
+	)
 
 	switch {
 	case gc.iface != "":
@@ -227,9 +258,9 @@ func (gwc *gatewayConfig) deriveFromPolicyGatewayConfig(logger *slog.Logger, gc 
 				return fmt.Errorf("failed to retrieve IPv6 address for egress interface: %w", err)
 			}
 		}
-	case gc.egressIP.IsValid():
-		// If the gateway config specifies an egress IP, use the interface with that IP as egress
-		// interface.
+	case gc.egressIP.IsValid() && !gwc.svcPinning:
+		// If the gateway config specifies a real egress IP, use the interface with that IP
+		// as egress interface.
 		egressIP4 = gc.egressIP
 
 		// TODO: add ipv6 support for specifying an egress IP, currently only ipv4 is supported.
@@ -243,8 +274,8 @@ func (gwc *gatewayConfig) deriveFromPolicyGatewayConfig(logger *slog.Logger, gc 
 		}
 
 	default:
-		// If the gateway config doesn't specify any egress IP or interface, use the
-		// interface with the IPv4 default route
+		// If the gateway config doesn't specify any egress IP or interface, or uses
+		// service pinning (virtual IP), use the interface with the IPv4 default route.
 		iface, err := route.NodeDeviceWithDefaultRoute(logger, true, false)
 		if err != nil {
 			return fmt.Errorf("failed to find interface with IPv4 default route: %w", err)
@@ -253,25 +284,33 @@ func (gwc *gatewayConfig) deriveFromPolicyGatewayConfig(logger *slog.Logger, gc 
 		gwc.ifaceName = iface.Attrs().Name
 		gwc.egressIfindex = uint32(iface.Attrs().Index)
 
-		egressIP4, err = netdevice.GetIfaceFirstIPv4Address(gwc.ifaceName)
-		if err != nil {
-			return fmt.Errorf("failed to retrieve IPv4 address for egress interface: %w", err)
+		if gc.egressIP.IsValid() {
+			// Service pinning: keep the virtual egress IP from the policy
+			egressIP4 = gc.egressIP
+		} else {
+			egressIP4, err = netdevice.GetIfaceFirstIPv4Address(gwc.ifaceName)
+			if err != nil {
+				return fmt.Errorf("failed to retrieve IPv4 address for egress interface: %w", err)
+			}
 		}
 
 		if v6Needed {
-			iface, err := route.NodeDeviceWithDefaultRoute(logger, false, true)
-			if err != nil {
-				return fmt.Errorf("failed to find interface with IPv6 default route: %w", err)
-			}
+			if gc.egressIP.IsValid() {
+				egressIP6 = EgressIPNotFoundIPv6
+			} else {
+				iface, err := route.NodeDeviceWithDefaultRoute(logger, false, true)
+				if err != nil {
+					return fmt.Errorf("failed to find interface with IPv6 default route: %w", err)
+				}
 
-			if iface.Attrs().Name != gwc.ifaceName {
-				return fmt.Errorf("IPv6 default route interface doesn't match IPv4 default route interface")
-			}
+				if iface.Attrs().Name != gwc.ifaceName {
+					return fmt.Errorf("IPv6 default route interface doesn't match IPv4 default route interface")
+				}
 
-			gwc.ifaceName = iface.Attrs().Name
-			egressIP6, err = netdevice.GetIfaceFirstIPv6Address(gwc.ifaceName)
-			if err != nil {
-				return fmt.Errorf("failed to retrieve IPv6 address for egress interface: %w", err)
+				egressIP6, err = netdevice.GetIfaceFirstIPv6Address(gwc.ifaceName)
+				if err != nil {
+					return fmt.Errorf("failed to retrieve IPv6 address for egress interface: %w", err)
+				}
 			}
 		}
 	}
@@ -328,7 +367,7 @@ func (config *PolicyConfig) forEachEndpointAndCIDR(f func(netip.Addr, netip.Pref
 	}
 }
 
-func parseEgressGateway(egressGateway *v2.EgressGateway, sipPort uint16, sipInspect bool) (*policyGatewayConfig, error) {
+func parseEgressGateway(egressGateway *v2.EgressGateway, svcPinning bool, sipPort uint16, sipInspect bool) (*policyGatewayConfig, error) {
 	if egressGateway == nil {
 		return nil, fmt.Errorf("egressGateway can't be empty")
 	}
@@ -337,11 +376,16 @@ func parseEgressGateway(egressGateway *v2.EgressGateway, sipPort uint16, sipInsp
 		return nil, fmt.Errorf("gateway configuration can't specify both an interface and an egress IP")
 	}
 
+	if svcPinning && egressGateway.Interface != "" {
+		return nil, fmt.Errorf("gateway configuration can't specify both service pinning and an interface")
+	}
+
 	policyGwc := &policyGatewayConfig{
 		nodeSelector: policyTypes.NewLabelSelector(api.NewESFromK8sLabelSelector(labels.LabelSourceK8sKeyPrefix, egressGateway.NodeSelector)),
 		iface:        egressGateway.Interface,
 		sipPort:      sipPort,
 		sipInspect:   sipInspect,
+		svcPinning:   svcPinning,
 	}
 
 	// EgressIP is not a required field, validate and parse it only if non-empty
@@ -349,6 +393,10 @@ func parseEgressGateway(egressGateway *v2.EgressGateway, sipPort uint16, sipInsp
 		addr, err := netip.ParseAddr(egressGateway.EgressIP)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse egress IP %s: %w", egressGateway.EgressIP, err)
+		}
+
+		if svcPinning && !addr.Is4() {
+			return nil, fmt.Errorf("IPv6 egress IP is not supported with service pinning")
 		}
 
 		policyGwc.egressIP = addr
@@ -368,6 +416,7 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 	var v6Needed bool
 	var sipInspect = false
 	var sipPort uint16 = 5060
+	var svcPinning = false
 
 	allowAllNamespacesRequirement := slim_metav1.LabelSelectorRequirement{
 		Key:      k8sConst.PodNamespaceLabel,
@@ -392,13 +441,17 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		sipPort = uint16(value)
 	}
 
+	if _, ret := cegp.Annotations[annotation.ServicePinningUsed]; ret {
+		svcPinning = true
+	}
+
 	destinationCIDRs := cegp.Spec.DestinationCIDRs
 	if destinationCIDRs == nil {
 		return nil, fmt.Errorf("destinationCIDRs can't be empty")
 	}
 
 	for _, egressGateway := range cegp.Spec.EgressGateways {
-		policyGwc, err := parseEgressGateway(&egressGateway, sipPort, sipInspect)
+		policyGwc, err := parseEgressGateway(&egressGateway, svcPinning, sipPort, sipInspect)
 		if err != nil {
 			return nil, err
 		}
@@ -408,7 +461,7 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 	// If there are any elements in EgressGateways skip the EgressGateway field.
 	if len(policyGwConfigs) == 0 {
 		egressGateway := cegp.Spec.EgressGateway
-		policyGwc, err := parseEgressGateway(egressGateway, sipPort, sipInspect)
+		policyGwc, err := parseEgressGateway(egressGateway, svcPinning, sipPort, sipInspect)
 		if err != nil {
 			return nil, err
 		}
