@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/stream"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
@@ -29,6 +30,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	k8sTypes "github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/labels"
+	lbpinning "github.com/cilium/cilium/pkg/loadbalancer/pinning"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/egressmap"
@@ -81,6 +83,7 @@ const (
 	eventDeleteEndpoint
 	eventUpdateNode
 	eventDeleteNode
+	eventLbPinMapUpdate
 )
 
 type Config struct {
@@ -112,6 +115,10 @@ type Manager struct {
 	// nodes stores nodes sorted by their name. The entries are sorted
 	// to ensure consistent gateway selection across all agents.
 	nodes []nodeTypes.Node
+	// last received load balancing pinning map
+	lbPinningMap lbpinning.PinningMap
+	// load balancing pinning map update events
+	lbPinMapEvents lbpinning.ObservableLbPinMapUpdateEvent
 	// nodesAddresses2Labels store the labels of each node so that the endpoint can match the node labels
 	// key is the IP address of the node, and value is the labels of the node.
 	nodesAddresses2Labels map[string]map[string]string
@@ -173,6 +180,7 @@ type Params struct {
 	PolicyMap6        *egressmap.PolicyMap6
 	Policies          resource.Resource[*Policy]
 	Nodes             resource.Resource[*cilium_api_v2.CiliumNode]
+	LbPinMapEvents    lbpinning.ObservableLbPinMapUpdateEvent
 	Endpoints         resource.Resource[*k8sTypes.CiliumEndpoint]
 	Sysctl            sysctl.Sysctl
 
@@ -236,9 +244,11 @@ func newEgressGatewayManager(p Params) (*Manager, error) {
 		policyMap6:                    p.PolicyMap6,
 		policies:                      p.Policies,
 		ciliumNodes:                   p.Nodes,
+		lbPinMapEvents:                p.LbPinMapEvents,
 		endpoints:                     p.Endpoints,
 		sysctl:                        p.Sysctl,
 		nodesAddresses2Labels:         make(map[string]map[string]string),
+		lbPinningMap:                  make(lbpinning.PinningMap),
 	}
 
 	t, err := trigger.NewTrigger(trigger.Parameters{
@@ -344,6 +354,7 @@ func (manager *Manager) processEvents(ctx context.Context) {
 	policyEvents := manager.policies.Events(ctx)
 	nodeEvents := manager.ciliumNodes.Events(ctx)
 	endpointEvents := manager.endpoints.Events(ctx, resource.WithRateLimiter(endpointsRateLimit))
+	lbPinMapUpdates := stream.ToChannel(ctx, manager.lbPinMapEvents)
 
 	for {
 		select {
@@ -376,6 +387,9 @@ func (manager *Manager) processEvents(ctx context.Context) {
 			} else {
 				manager.handleEndpointEvent(event)
 			}
+
+		case event := <-lbPinMapUpdates:
+			manager.handleLbPinMapEvent(event)
 		}
 	}
 }
@@ -539,6 +553,15 @@ func (manager *Manager) handleEndpointEvent(event resource.Event[*k8sTypes.Ciliu
 		manager.deleteEndpoint(endpoint)
 		event.Done(nil)
 	}
+}
+
+func (manager *Manager) handleLbPinMapEvent(event lbpinning.LbPinMapUpdateEvent) {
+	manager.Lock()
+	defer manager.Unlock()
+
+	manager.setEventBitmap(eventLbPinMapUpdate)
+	manager.lbPinningMap = event.PinningMap
+	manager.reconciliationTrigger.TriggerWithReason("LB pinning map update")
 }
 
 // handleNodeEvent takes care of node upserts and removals.
@@ -803,7 +826,7 @@ func (manager *Manager) reconcileLocked() {
 		manager.updatePoliciesMatchedEndpointIDs()
 	}
 
-	if manager.eventBitmapIsSet(eventK8sSyncDone, eventAddPolicy, eventDeletePolicy, eventUpdateNode, eventDeleteNode) {
+	if manager.eventBitmapIsSet(eventK8sSyncDone, eventAddPolicy, eventDeletePolicy, eventUpdateNode, eventDeleteNode, eventLbPinMapUpdate) {
 		manager.regenerateGatewayConfigs()
 
 		// Sysctl updates are handled by a reconciler, with the initial update attempting to wait some time
@@ -832,4 +855,20 @@ func (manager *Manager) reconcileLocked() {
 	manager.eventsBitmap = 0
 
 	manager.reconciliationEventsCount.Add(1)
+}
+
+func (manager *Manager) SelectsPinnedNodeAsGateway(node nodeTypes.Node, egressIP netip.Addr) (bool, error) {
+	nodeIp := node.GetNodeInternalIPv4()
+
+	if nodeIp == nil {
+		return false, fmt.Errorf("node '%s' has no assigned IP address", node.Name)
+	}
+
+	for serviceIp, pinnedNodeIp := range manager.lbPinningMap {
+		if serviceIp.ServiceIP.Addr() == egressIP {
+			return pinnedNodeIp.NodeIP.IP().Equal(nodeIp), nil
+		}
+	}
+
+	return false, nil
 }
