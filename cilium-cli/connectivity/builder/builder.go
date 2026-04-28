@@ -294,6 +294,7 @@ func concurrentTests(connTests []*check.ConnectivityTest) error {
 		egressGatewayMultigateway{},
 		egressGatewayExcludedCidrs{},
 		egressGatewayWithL7Policy{},
+		egressGatewaySipPinning{},
 		podToNodeCidrpolicy{},
 		northSouthLoadbalancingWithL7Policy{},
 		echoIngressL7{},
