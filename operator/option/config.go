@@ -412,11 +412,11 @@ func (c *OperatorConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
 	c.LeaderElectionRetryPeriod = vp.GetDuration(LeaderElectionRetryPeriod)
 	c.EnableGatewayAPI = vp.GetBool(EnableGatewayAPI)
 	c.ProxyIdleTimeoutSeconds = vp.GetInt(ProxyIdleTimeoutSeconds)
-	if c.ProxyIdleTimeoutSeconds == 0 {
+	if !vp.IsSet(ProxyIdleTimeoutSeconds) {
 		c.ProxyIdleTimeoutSeconds = DefaultProxyIdleTimeoutSeconds
 	}
 	c.ProxyStreamIdleTimeoutSeconds = vp.GetInt(ProxyStreamIdleTimeoutSeconds)
-	if c.ProxyStreamIdleTimeoutSeconds == 0 {
+	if !vp.IsSet(ProxyStreamIdleTimeoutSeconds) {
 		c.ProxyStreamIdleTimeoutSeconds = DefaultProxyStreamIdleTimeoutSeconds
 	}
 	c.CiliumPodLabels = vp.GetString(CiliumPodLabels)
