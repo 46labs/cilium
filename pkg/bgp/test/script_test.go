@@ -28,6 +28,7 @@ import (
 	"github.com/cilium/cilium/pkg/bgp/agent"
 	"github.com/cilium/cilium/pkg/bgp/manager"
 	"github.com/cilium/cilium/pkg/bgp/test/commands"
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	envoyCfg "github.com/cilium/cilium/pkg/envoy/config"
@@ -128,6 +129,9 @@ func TestPrivilegedScript(t *testing.T) {
 			daemonk8s.ResourcesCell,
 			daemonk8s.TablesCell,
 			node.LocalNodeStoreTestCell,
+			cell.Provide(
+				func() cmtypes.ClusterInfo { return cmtypes.ClusterInfo{} },
+			),
 			cell.Config(envoyCfg.SecretSyncConfig{}),
 
 			// Load-balancer writer (provides Frontend table) and reflectors (populate from K8s services)
