@@ -10,8 +10,9 @@ import (
 	"net/netip"
 
 	"github.com/cilium/cilium/pkg/annotation"
-	"github.com/cilium/cilium/pkg/endpoint"
+	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/identity"
+	identityCache "github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
@@ -43,18 +44,9 @@ type CrapParams struct {
 	Services          resource.Resource[*slim_corev1.Service]
 	Endpoints         resource.Resource[*k8sTypes.CiliumEndpoint]
 	Logger            *slog.Logger
-	IdentityAllocator identityAllocatorSlim
-	EndpointManager   endpointManagerSlim
-	BpfMap            crap.ICrapMap
-}
-
-type endpointManagerSlim interface {
-	LookupIP(ip netip.Addr) (ep *endpoint.Endpoint)
-}
-
-type identityAllocatorSlim interface {
-	WaitForInitialGlobalIdentities(context.Context) error
-	LookupIdentityByID(ctx context.Context, id identity.NumericIdentity) *identity.Identity
+	IdentityAllocator identityCache.IdentityAllocator
+	EndpointManager   endpointmanager.EndpointManager
+	BpfMap            *crap.CrapMap
 }
 
 type endpointMetadata struct {
@@ -97,13 +89,9 @@ type CrapManager struct {
 	trigger           job.Trigger
 	logger            *slog.Logger
 	ch                chan *diff
-	identityAllocator identityAllocatorSlim
-	bpfmap            crap.ICrapMap
-	endpointManager   endpointManagerSlim
-
-	// for testing
-	svcProcessed chan int
-	epProcessed  chan int
+	identityAllocator identityCache.IdentityAllocator
+	bpfmap            *crap.CrapMap
+	endpointManager   endpointmanager.EndpointManager
 }
 
 func newCrapManager(params CrapParams) *CrapManager {
@@ -154,7 +142,6 @@ func (cm *CrapManager) getEndpointMetadata(endpoint *k8sTypes.CiliumEndpoint, id
 		}
 	}
 
-	fmt.Printf("getEndpointMetadata labels %+v \n", identityLabels)
 	data := &endpointMetadata{
 		ip:        addr,
 		labels:    identityLabels.K8sStringMap(),
@@ -468,13 +455,6 @@ func (cm *CrapManager) reconcile(ctx context.Context, health cell.Health) error 
 
 			desired := buildRules(epDataStore, svcDataStore)
 			cm.updateRawRules(desired)
-
-			if cm.svcProcessed != nil {
-				cm.svcProcessed <- len(svcDataStore)
-			}
-			if cm.epProcessed != nil {
-				cm.epProcessed <- len(epDataStore)
-			}
 
 		case <-ctx.Done():
 			return nil
