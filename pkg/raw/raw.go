@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -52,13 +53,17 @@ type endpointMetadata struct {
 	namespace string
 }
 
+type portRange struct {
+	begin uint16
+	end   uint16
+}
+
 type serviceMetadata struct {
-	labels    map[string]string
-	id        serviceID
-	vip       []netip.Addr
-	namespace string
-	portBegin uint16
-	portEnd   uint16
+	labels     map[string]string
+	id         serviceID
+	vip        []netip.Addr
+	namespace  string
+	portRanges []portRange
 }
 
 type endpointID = types.UID
@@ -135,36 +140,39 @@ func (cm *CrapManager) getEndpointMetadata(endpoint *k8sTypes.CiliumEndpoint, id
 	return data, nil
 }
 
-func parsePortRangeAnnotation(val string) (uint16, uint16, error) {
+func parsePortRangeAnnotation(val string) ([]portRange, error) {
 	val = strings.TrimSpace(val)
 	if val == "" {
-		return 0, 65535, nil
+		return []portRange{{begin: 0, end: 65535}}, nil
 	}
 
-	parts := strings.SplitN(val, "-", 2)
-	if len(parts) == 1 {
-		port, err := strconv.ParseUint(parts[0], 10, 16)
-		if err != nil {
-			return 0, 65535, fmt.Errorf("invalid port: %s", parts[0])
+	var ranges []portRange
+	for _, part := range strings.Split(val, ",") {
+		part = strings.TrimSpace(part)
+		sub := strings.SplitN(part, "-", 2)
+		if len(sub) == 1 {
+			port, err := strconv.ParseUint(sub[0], 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port: %s", sub[0])
+			}
+			ranges = append(ranges, portRange{begin: uint16(port), end: uint16(port)})
+		} else {
+			begin, err := strconv.ParseUint(sub[0], 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port_begin: %s", sub[0])
+			}
+			end, err := strconv.ParseUint(sub[1], 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port_end: %s", sub[1])
+			}
+			if begin > end {
+				return nil, fmt.Errorf("port_begin (%d) > port_end (%d)", begin, end)
+			}
+			ranges = append(ranges, portRange{begin: uint16(begin), end: uint16(end)})
 		}
-		return uint16(port), uint16(port), nil
 	}
 
-	begin, err := strconv.ParseUint(parts[0], 10, 16)
-	if err != nil {
-		return 0, 65535, fmt.Errorf("invalid port_begin: %s", parts[0])
-	}
-
-	end, err := strconv.ParseUint(parts[1], 10, 16)
-	if err != nil {
-		return 0, 65535, fmt.Errorf("invalid port_end: %s", parts[1])
-	}
-
-	if begin > end {
-		return 0, 65535, fmt.Errorf("port_begin (%d) > port_end (%d)", begin, end)
-	}
-
-	return uint16(begin), uint16(end), nil
+	return ranges, nil
 }
 
 func getServiceMetadata(svc *slim_corev1.Service) (*serviceMetadata, error) {
@@ -178,22 +186,21 @@ func getServiceMetadata(svc *slim_corev1.Service) (*serviceMetadata, error) {
 		addrs = append(addrs, addr)
 	}
 
-	portBegin, portEnd := uint16(0), uint16(65535)
+	portRanges := []portRange{{begin: 0, end: 65535}}
 	if rawPorts, ok := annotation.Get(svc, annotation.ServiceRawPorts); ok {
-		pb, pe, err := parsePortRangeAnnotation(rawPorts)
+		ranges, err := parsePortRangeAnnotation(rawPorts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse raw-ports annotation: %w", err)
 		}
-		portBegin, portEnd = pb, pe
+		portRanges = ranges
 	}
 
 	data := &serviceMetadata{
-		vip:       addrs,
-		labels:    svc.Spec.Selector,
-		id:        svc.UID,
-		namespace: svc.Namespace,
-		portBegin: portBegin,
-		portEnd:   portEnd,
+		vip:        addrs,
+		labels:     svc.Spec.Selector,
+		id:         svc.UID,
+		namespace:  svc.Namespace,
+		portRanges: portRanges,
 	}
 
 	return data, nil
@@ -342,10 +349,10 @@ func (config *serviceMetadata) matchesPodLabels(epNamespace string, epLabels map
 }
 
 func buildRules(eps map[endpointID]*endpointMetadata, svcs map[serviceID]*serviceMetadata) map[crap.CrapKey]crap.CrapVal {
-	ret := make(map[crap.CrapKey]crap.CrapVal)
+	perIP := make(map[netip.Addr][]crap.CrapValRule)
 
 	for _, svc := range svcs {
-		var targetEp *endpointMetadata = nil
+		var targetEp *endpointMetadata
 
 		for _, ep := range eps {
 			if svc.matchesPodLabels(ep.namespace, ep.labels) {
@@ -354,16 +361,49 @@ func buildRules(eps map[endpointID]*endpointMetadata, svcs map[serviceID]*servic
 			}
 		}
 
-		if targetEp == nil {
+		if targetEp == nil || !targetEp.ip.Is4() {
 			continue
 		}
 
 		for _, ip := range svc.vip {
-			key := crap.NewKey(ip)
-			val := crap.NewVal(targetEp.ip, svc.portBegin, svc.portEnd)
-
-			ret[key] = val
+			if !ip.Is4() {
+				continue
+			}
+			for _, pr := range svc.portRanges {
+				perIP[ip] = append(perIP[ip], crap.CrapValRule{
+					PodIp:     targetEp.ip,
+					PortBegin: pr.begin,
+					PortEnd:   pr.end,
+				})
+			}
 		}
+	}
+
+	ret := make(map[crap.CrapKey]crap.CrapVal)
+	for ip, entries := range perIP {
+		filtered := entries[:0]
+		for _, e := range entries {
+			if e.PodIp.Is4() {
+				filtered = append(filtered, e)
+			}
+		}
+		if len(filtered) == 0 {
+			continue
+		}
+
+		sort.Slice(filtered, func(i, j int) bool {
+			if cmp := filtered[i].PodIp.Compare(filtered[j].PodIp); cmp != 0 {
+				return cmp < 0
+			}
+			if filtered[i].PortBegin != filtered[j].PortBegin {
+				return filtered[i].PortBegin < filtered[j].PortBegin
+			}
+			return filtered[i].PortEnd < filtered[j].PortEnd
+		})
+
+		n := min(len(filtered), crap.MaxRulesPerIP)
+		key := crap.NewKey(ip)
+		ret[key] = crap.NewValWithRules(filtered[:n])
 	}
 
 	return ret
