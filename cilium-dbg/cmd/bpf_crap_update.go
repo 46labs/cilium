@@ -16,7 +16,10 @@ import (
 )
 
 const (
-	crapUpdateUsage = "Create/Update CRAP entry.\n"
+	crapUpdateUsage = "Create/Update CRAP entry.\n\n" +
+		"Usage: cilium bpf crap update <public_ip> <pod_ip> [port_begin] [port_end]\n\n" +
+		"If port_begin and port_end are omitted, the full 0-65535 range is used.\n" +
+		"If only port_begin is given, it applies to that single port.\n"
 )
 
 var bpfCrapUpdateCmd = &cobra.Command{
@@ -66,6 +69,10 @@ var bpfCrapUpdateCmd = &cobra.Command{
 				Fatalf("Unable to parse port_end '%s'", args[3])
 			}
 			portEnd = uint16(v)
+		}
+
+		if portBegin > portEnd {
+			Fatalf("port_begin (%d) must not be greater than port_end (%d)", portBegin, portEnd)
 		}
 
 		if err := m.UpdateCrapMapping(dst_ip, pod_ip, portBegin, portEnd); err != nil {

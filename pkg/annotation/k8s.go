@@ -170,10 +170,11 @@ const (
 
 	ServiceRaw = ServicePrefix + "/raw"
 
-	// ServiceRawPorts is the annotation used to specify a port range for CRAP
-	// matching. Format: "port" (single port) or "port_begin-port_end" (inclusive range).
-	// When set, CRAP rules for this service only apply to packets whose destination
-	// port falls within the specified range.
+	// ServiceRawPorts is the annotation used to specify port ranges for CRAP
+	// matching. Format: "port" (single port), "port_begin-port_end" (inclusive range),
+	// or comma-separated list thereof (e.g. "80,443,3000-4000"). When set, CRAP rules
+	// for this service only apply to packets whose destination port falls within the
+	// specified ranges. Ranges are non-overlapping.
 	ServiceRawPorts = ServicePrefix + "/raw-ports"
 
 	// ServiceSourceRangesPolicy is the annotation name used to specify the policy

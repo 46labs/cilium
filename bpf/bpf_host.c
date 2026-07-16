@@ -734,30 +734,36 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 
 	tv = map_lookup_elem(&cilium_crap_map, &key);
 	if (tv) {
-		if (ip4->protocol != IPPROTO_TCP && ip4->protocol != IPPROTO_UDP)
+		__u16 dport;
+
+		if (!crap_check_proto_and_load_dport(ctx, ip4, &dport))
 			goto skip_crap;
 
-		__be16 dport_be;
+#pragma unroll
+		for (int i = 0; i < MAX_CRAP_RULES_PER_IP; i++) {
+			struct crap_rule *rule = &tv->rules[i];
 
-		if (l4_load_port(ctx, ETH_HLEN + ipv4_hdrlen(ip4) + TCP_DPORT_OFF, &dport_be))
-			goto skip_crap;
+			if (!crap_rule_is_valid(rule))
+				break;
 
-		if (!crap_port_match(bpf_ntohs(dport_be), tv))
-			goto skip_crap;
+			if (!crap_rule_port_match(dport, rule))
+				continue;
 
-		ep = __lookup_ip4_endpoint(tv->pod_ip);
-		if (ep) {
-			int l3_off = ETH_HLEN;
+			ep = __lookup_ip4_endpoint(rule->pod_ip);
+			if (ep) {
+				int l3_off = ETH_HLEN;
 
-			return ipv4_local_delivery(ctx, l3_off, secctx, MARK_MAGIC_IDENTITY, ip4, ep,
-						   METRIC_INGRESS, true, false, 0);
-		}
+				return ipv4_local_delivery(ctx, l3_off, secctx,
+							   MARK_MAGIC_IDENTITY, ip4, ep,
+							   METRIC_INGRESS, true, false, 0);
+			}
 
-		info = lookup_ip4_remote_endpoint(tv->pod_ip, 0);
-		if (info) {
-			return encap_and_redirect_with_nodeid(ctx, info, secctx,
-							      info->sec_identity, &trace,
-							      bpf_htons(ETH_P_IP));
+			info = lookup_ip4_remote_endpoint(rule->pod_ip, 0);
+			if (info) {
+				return encap_and_redirect_with_nodeid(ctx, info, secctx,
+								      info->sec_identity, &trace,
+								      bpf_htons(ETH_P_IP));
+			}
 		}
 	}
 

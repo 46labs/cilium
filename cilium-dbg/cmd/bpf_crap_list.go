@@ -16,7 +16,7 @@ import (
 
 const (
 	crapRuleCidrTitle = "Public IP"
-	crapRuleTitle     = "Pod IP"
+	crapRuleTitle     = "Rule"
 )
 
 var (
@@ -38,7 +38,12 @@ var bpfCrapListCmd = &cobra.Command{
 
 		rules := make(map[string][]string)
 		parse := func(key *crap.CrapKey, val *crap.CrapVal) {
-			rules[key.String()] = append(rules[key.String()], val.String())
+			for i := range val.Rules {
+				if !val.Rules[i].IsValid() {
+					break
+				}
+				rules[key.String()] = append(rules[key.String()], val.Rules[i].String())
+			}
 		}
 
 		if err := m.IterateWithCallback(parse); err != nil {
