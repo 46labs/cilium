@@ -6,6 +6,7 @@ package crap
 import (
 	"fmt"
 	"net/netip"
+	"strings"
 
 	"log/slog"
 
@@ -20,8 +21,9 @@ import (
 )
 
 const (
-	MaxEntries = 8192
-	CrapMapName = "cilium_crap_map"
+	MaxEntries    = 8192
+	MaxRulesPerIP = 8
+	CrapMapName   = "cilium_crap_map"
 )
 
 // Must be in sync with struct crap_key in <bpf/lib/crap.h>
@@ -48,20 +50,78 @@ func NewKey(dstIP netip.Addr) CrapKey {
 	return result
 }
 
-// CrapVal implements the bpf.MapValue interface.
-//
-// Must be in sync with struct crap_value in <bpf/lib/crap.h>
-type CrapVal struct {
+// Must be in sync with struct crap_rule in <bpf/lib/crap.h>
+type CrapRule struct {
 	PodIp     types.IPv4 `align:"pod_ip"`
 	PortBegin uint16     `align:"port_begin"`
 	PortEnd   uint16     `align:"port_end"`
 }
 
+func (r *CrapRule) String() string {
+	return fmt.Sprintf("pod_ip=%s ports=%d-%d", r.PodIp, r.PortBegin, r.PortEnd)
+}
+
+func (r *CrapRule) IsValid() bool {
+	return r.PodIp != [4]byte{}
+}
+
+// Must be in sync with struct crap_value in <bpf/lib/crap.h>
+type CrapVal struct {
+	Rules [MaxRulesPerIP]CrapRule `align:"rules"`
+}
+
 func (v *CrapVal) String() string {
-	return fmt.Sprintf("pod_ip=%s ports=%d-%d", v.PodIp, v.PortBegin, v.PortEnd)
+	var sb strings.Builder
+	for i := range v.Rules {
+		if !v.Rules[i].IsValid() {
+			break
+		}
+		if sb.Len() > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(v.Rules[i].String())
+	}
+	return sb.String()
 }
 
 func (v *CrapVal) New() bpf.MapValue { return &CrapVal{} }
+
+func NewVal(podIp netip.Addr, portBegin, portEnd uint16) CrapVal {
+	val := CrapVal{}
+	if !podIp.Is4() {
+		return val
+	}
+	ip4 := podIp.As4()
+	copy(val.Rules[0].PodIp[:], ip4[:])
+	val.Rules[0].PortBegin = portBegin
+	val.Rules[0].PortEnd = portEnd
+	return val
+}
+
+func NewValWithRules(rules []CrapValRule) CrapVal {
+	val := CrapVal{}
+	idx := 0
+	for _, r := range rules {
+		if idx >= MaxRulesPerIP {
+			break
+		}
+		if !r.PodIp.Is4() {
+			continue
+		}
+		ip4 := r.PodIp.As4()
+		copy(val.Rules[idx].PodIp[:], ip4[:])
+		val.Rules[idx].PortBegin = r.PortBegin
+		val.Rules[idx].PortEnd = r.PortEnd
+		idx++
+	}
+	return val
+}
+
+type CrapValRule struct {
+	PodIp     netip.Addr
+	PortBegin uint16
+	PortEnd   uint16
+}
 
 // Map represents an CRAP BPF map.
 type CrapMap struct {
@@ -89,7 +149,7 @@ func newCrapMap(lc cell.Lifecycle, registry *metrics.Registry, pinning ebpf.PinT
 		ebpf.Hash,
 		&CrapKey{},
 		&CrapVal{},
-		8192,
+		MaxEntries,
 		unix.BPF_F_NO_PREALLOC,
 	).WithCache().WithPressureMetric(registry).
 		WithEvents(option.Config.GetEventBufferConfig(CrapMapName))
@@ -110,22 +170,6 @@ func newCrapMap(lc cell.Lifecycle, registry *metrics.Registry, pinning ebpf.PinT
 	})
 
 	return &CrapMap{m}
-}
-
-func NewVal(newTunnelEndpoint netip.Addr, portBegin, portEnd uint16) CrapVal {
-	value := CrapVal{
-		PortBegin: portBegin,
-		PortEnd:   portEnd,
-	}
-
-	if !newTunnelEndpoint.Is4() {
-		return value
-	}
-
-	ip4 := newTunnelEndpoint.As4()
-	copy(value.PodIp[:], ip4[:])
-
-	return value
 }
 
 // OpenPinnedCrapMap opens an existing pinned CRAP map.
@@ -185,9 +229,4 @@ func (m *CrapMap) IterateWithCallback(cb CrapIterateCallback) error {
 func (k *CrapKey) Match(dst_ip netip.Addr) bool {
 	nkey := NewKey(dst_ip)
 	return nkey == *k
-}
-
-func (v *CrapVal) Match(podIP netip.Addr, portBegin, portEnd uint16) bool {
-	nval := NewVal(podIP, portBegin, portEnd)
-	return nval == *v
 }

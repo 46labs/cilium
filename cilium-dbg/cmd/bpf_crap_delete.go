@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	crapRuleDelUsage = "Delete the CRAP rule.\n"
+	crapRuleDelUsage = "Delete all CRAP rules for a public IP.\n\n" +
+		"Usage: cilium bpf crap delete <public_ip>\n"
 )
 
 var bpfCrapDeleteCmd = &cobra.Command{

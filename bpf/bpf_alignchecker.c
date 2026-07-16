@@ -114,4 +114,5 @@ add_type(struct skip_lb6_key);
 
 #include "lib/crap.h"
 add_type(struct crap_key);
+add_type(struct crap_rule);
 add_type(struct crap_value);

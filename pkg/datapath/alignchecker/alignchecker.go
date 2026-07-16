@@ -95,6 +95,7 @@ var (
 		"policy_verdict_notify":   {monitor.PolicyVerdictNotify{}},
 		"trace_sock_notify":       {monitor.TraceSockNotify{}},
 		"crap_key":                {crap.CrapKey{}},
+		"crap_rule":               {crap.CrapRule{}},
 		"crap_value":              {crap.CrapVal{}},
 		"lb4_pinning_key":         {lbmap.LbPinning4Key{}},
 		"lb4_pinning_val":         {lbmap.LbPinning4Value{}},
