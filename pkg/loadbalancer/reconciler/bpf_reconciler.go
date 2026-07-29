@@ -33,6 +33,7 @@ import (
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/promise"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -155,6 +156,8 @@ type BPFOps struct {
 	// nodePortAddrByPort are the last used NodePort addresses for a given NodePort
 	// (or HostPort) service (by port).
 	nodePortAddrByPort map[nodePortAddrKey][]netip.Addr
+
+	ctMapGC ctmap.GCRunner
 }
 
 type nodePortAddrKey struct {
@@ -186,6 +189,7 @@ type bpfOpsParams struct {
 	Maglev         *maglev.Maglev
 	DB             *statedb.DB
 	NodeAddresses  statedb.Table[tables.NodeAddress]
+	CTMapGC        ctmap.GCRunner
 }
 
 const (
@@ -203,6 +207,7 @@ func newBPFOps(p bpfOpsParams) *BPFOps {
 		LBMaps:    p.LBMaps,
 		db:        p.DB,
 		nodeAddrs: p.NodeAddresses,
+		ctMapGC:   p.CTMapGC,
 	}
 	ops.setLastUpdatedAt()
 
@@ -428,13 +433,18 @@ func (ops *BPFOps) deleteFrontend(fe *loadbalancer.Frontend) error {
 		}
 	}
 
-	for _, orphanState := range ops.orphanBackends(fe.Address, nil) {
+	orphanBackends := ops.orphanBackends(fe.Address, nil)
+	ctNatBackends := getCtNatAddrs(orphanBackends)
+
+	for _, orphanState := range orphanBackends {
 		ops.log.Debug("Delete orphan backend", logfields.Address, orphanState.addr)
 		if err := ops.deleteBackend(orphanState.addr.IsIPv6(), orphanState.id); err != nil {
 			return fmt.Errorf("delete backend %d: %w", orphanState.id, err)
 		}
 		ops.releaseBackend(orphanState.id, orphanState.addr)
 	}
+
+	ops.cleanCtNat(ctNatBackends)
 
 	var svcKey maps.ServiceKey
 	var revNatKey maps.RevNatKey
@@ -896,7 +906,10 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 		backendAddrs.Insert(be.Address)
 	}
 
-	for _, orphanState := range ops.orphanBackends(fe.Address, backendAddrs) {
+	orphanBackends := ops.orphanBackends(fe.Address, backendAddrs)
+	ctNatBackends := getCtNatAddrs(orphanBackends)
+
+	for _, orphanState := range orphanBackends {
 		ops.log.Debug("Delete orphan backend", logfields.Address, orphanState.addr)
 		ops.deleteRestoredQuarantinedBackends(fe.Address, orphanState.addr)
 		if err := ops.deleteBackend(orphanState.addr.IsIPv6(), orphanState.id); err != nil {
@@ -907,6 +920,8 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 		}
 		ops.releaseBackend(orphanState.id, orphanState.addr)
 	}
+
+	ops.cleanCtNat(ctNatBackends)
 
 	activeCount, terminatingCount, inactiveCount := 0, 0, 0
 
@@ -1485,6 +1500,27 @@ func (ops *BPFOps) orphanBackends(frontend loadbalancer.L3n4Addr, backends sets.
 		}
 	}
 	return orphans
+}
+
+func getCtNatAddrs(orphanBackends []backendState) map[netip.Addr]struct{} {
+	ctNatAddrs := map[netip.Addr]struct{}{}
+
+	for _, orphanState := range orphanBackends {
+		ctNatAddrs[orphanState.addr.Addr()] = struct{}{}
+	}
+
+	return ctNatAddrs
+}
+
+func (ops *BPFOps) cleanCtNat(ctNatAddrs map[netip.Addr]struct{}) {
+	deleted, err := ops.ctMapGC.Run(ctmap.GCFilter{MatchIPs: ctNatAddrs})
+
+	if err != nil {
+		ops.log.log.Error("Clean CT/NAT", "error", err.Error())
+		return
+	}
+
+	ops.log.Debug("Clean CT/NAT", "deleted", deleted)
 }
 
 // checkBackend returns true if the backend should be updated.
