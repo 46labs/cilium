@@ -3004,9 +3004,11 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 #ifdef ENABLE_MASQUERADE_IPV4
 			if (tuple.sip_call_id_hash) {
 				struct ipv4_nat_entry *state = NULL;
-				tuple.flags = TUPLE_F_IN;
+				struct ipv4_ct_tuple nat_tuple = tuple;
+				nat_tuple.flags = TUPLE_F_IN;
 
-				state = snat_v4_lookup(&tuple);
+				ipv4_ct_tuple_swap_ports(&nat_tuple);
+				state = snat_v4_lookup(&nat_tuple);
 				if (state != NULL) {
 					return tail_call_internal(ctx, CILIUM_CALL_IPV4_NODEPORT_NAT_INGRESS, ext_err);
 				}
