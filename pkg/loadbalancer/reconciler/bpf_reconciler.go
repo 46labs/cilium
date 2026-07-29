@@ -1513,6 +1513,10 @@ func getCtNatAddrs(orphanBackends []backendState) map[netip.Addr]struct{} {
 }
 
 func (ops *BPFOps) cleanCtNat(ctNatAddrs map[netip.Addr]struct{}) {
+	if len(ctNatAddrs) == 0 {
+		return
+	}
+
 	deleted, err := ops.ctMapGC.Run(ctmap.GCFilter{MatchIPs: ctNatAddrs})
 
 	if err != nil {
