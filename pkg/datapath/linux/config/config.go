@@ -417,12 +417,16 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	const (
 		selectionRandom = iota + 1
 		selectionMaglev
+		selectionSrcRangeIdx = 4
 	)
 	cDefinesMap["LB_SELECTION_RANDOM"] = fmt.Sprintf("%d", selectionRandom)
 	cDefinesMap["LB_SELECTION_MAGLEV"] = fmt.Sprintf("%d", selectionMaglev)
-	if cfg.LBConfig.AlgorithmAnnotation {
-		cDefinesMap["LB_SELECTION_PER_SERVICE"] = "1"
-	}
+	cDefinesMap["LB_SELECTION_SRC_RANGE_IDX"] = fmt.Sprintf("%d", selectionSrcRangeIdx)
+	/* The per-service load balancing algorithm annotation is always enabled in
+	 * the datapath. Services without an algorithm annotation (algorithm field
+	 * set to zero) fall back to the compile-time default LB_SELECTION.
+	 */
+	cDefinesMap["LB_SELECTION_PER_SERVICE"] = "1"
 	if cfg.LBConfig.LBAlgorithm == loadbalancer.LBAlgorithmRandom {
 		cDefinesMap["LB_SELECTION"] = fmt.Sprintf("%d", selectionRandom)
 	} else if cfg.LBConfig.LBAlgorithm == loadbalancer.LBAlgorithmMaglev {

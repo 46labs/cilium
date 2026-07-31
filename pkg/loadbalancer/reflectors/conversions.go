@@ -140,6 +140,17 @@ func convertService(cfg loadbalancer.Config, extCfg loadbalancer.ExternalConfig,
 		s.SourceRanges = append(s.SourceRanges, prefix)
 	}
 
+	if value, ok := annotation.Get(svc, annotation.ServiceSourceRangeIndex); ok {
+		if entries, err := loadbalancer.ParseSourceRangeIndexes(value); err != nil {
+			log().Warn("Ignoring annotation",
+				logfields.Error, err,
+				logfields.Annotations, annotation.ServiceSourceRangeIndex,
+			)
+		} else {
+			s.SourceRangeIndexes = entries
+		}
+	}
+
 	switch svc.Spec.ExternalTrafficPolicy {
 	case slim_corev1.ServiceExternalTrafficPolicyLocal:
 		s.ExtTrafficPolicy = loadbalancer.SVCTrafficPolicyLocal
