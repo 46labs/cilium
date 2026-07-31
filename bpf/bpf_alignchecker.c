@@ -48,6 +48,8 @@ add_type(struct lb_affinity_val);
 add_type(struct lb_affinity_match);
 add_type(struct lb4_src_range_key);
 add_type(struct lb6_src_range_key);
+add_type(struct lb4_src_range_idx_key);
+add_type(struct lb6_src_range_idx_key);
 
 #include "lib/metrics.h"
 add_type(struct metrics_key);

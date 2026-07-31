@@ -137,6 +137,11 @@ const (
 	// - maglev
 	ServiceLoadBalancingAlgorithm = ServicePrefix + "/lb-algorithm"
 
+	// ServiceSourceRangeIndex maps client source CIDRs (optionally restricted to
+	// a client source port) to a deterministic backend selection index, computed
+	// as index % backend-count. See ParseSourceRangeIndexes for the value format.
+	ServiceSourceRangeIndex = ServicePrefix + "/lb-source-range-index"
+
 	// ServiceSipInspect indicates that sip-inspect should take place.
 	ServiceSipInspect = ServicePrefix + "/sip-inspect"
 

@@ -1493,7 +1493,11 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 			return DROP_UNKNOWN_CT;
 		}
 
+#ifdef LB_SELECTION_PER_SERVICE
+		if (backend_local || lb6_algorithm(svc) == LB_SELECTION_SRC_RANGE_IDX) {
+#else
 		if (backend_local) {
+#endif
 			ctx_set_xfer(ctx, XFER_PKT_NO_SVC);
 			return CTX_ACT_OK;
 		}
@@ -2928,7 +2932,12 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 			return DROP_UNKNOWN_CT;
 		}
 
+#ifdef LB_SELECTION_PER_SERVICE
+		if (backend_local || svc->sip_inspect ||
+		    lb4_algorithm(svc) == LB_SELECTION_SRC_RANGE_IDX) {
+#else
 		if (backend_local || svc->sip_inspect) {
+#endif
 			ctx_set_xfer(ctx, XFER_PKT_NO_SVC);
 			return CTX_ACT_OK;
 		}

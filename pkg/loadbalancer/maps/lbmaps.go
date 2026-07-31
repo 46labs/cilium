@@ -93,6 +93,12 @@ type sourceRangeMaps interface {
 	DumpSourceRange(cb func(SourceRangeKey, *SourceRangeValue)) error
 }
 
+type sourceRangeIndexMaps interface {
+	UpdateSourceRangeIndex(SourceRangeIndexKey, *SourceRangeIndexValue) error
+	DeleteSourceRangeIndex(SourceRangeIndexKey) error
+	DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error
+}
+
 type maglevMaps interface {
 	UpdateMaglev(key MaglevOuterKey, backendIDs []loadbalancer.BackendID, ipv6 bool) error
 	DeleteMaglev(key MaglevOuterKey, ipv6 bool) error
@@ -121,6 +127,7 @@ type LBMaps interface {
 	revNatMaps
 	affinityMaps
 	sourceRangeMaps
+	sourceRangeIndexMaps
 	maglevMaps
 	sockRevNatMaps
 	pinningMaps
@@ -137,15 +144,16 @@ type BPFLBMaps struct {
 	ExtCfg    loadbalancer.ExternalConfig
 	MaglevCfg maglev.Config
 
-	service4Map, service6Map         *bpf.Map
-	backend4Map, backend6Map         *bpf.Map
-	revNat4Map, revNat6Map           *bpf.Map
-	affinityMatchMap                 *bpf.Map
-	affinity4Map, affinity6Map       *bpf.Map
-	sockRevNat4Map, sockRevNat6Map   *bpf.Map
-	sourceRange4Map, sourceRange6Map *bpf.Map
-	maglev4Map, maglev6Map           *bpf.Map // Inner maps are referenced inside maglev4Map and maglev6Map and can be retrieved by lbmap.MaglevInnerMapFromID.
-	pinningMap                       *bpf.Map
+	service4Map, service6Map                   *bpf.Map
+	backend4Map, backend6Map                   *bpf.Map
+	revNat4Map, revNat6Map                     *bpf.Map
+	affinityMatchMap                           *bpf.Map
+	affinity4Map, affinity6Map                 *bpf.Map
+	sockRevNat4Map, sockRevNat6Map             *bpf.Map
+	sourceRange4Map, sourceRange6Map           *bpf.Map
+	sourceRangeIndex4Map, sourceRangeIndex6Map *bpf.Map
+	maglev4Map, maglev6Map                     *bpf.Map // Inner maps are referenced inside maglev4Map and maglev6Map and can be retrieved by lbmap.MaglevInnerMapFromID.
+	pinningMap                                 *bpf.Map
 
 	maglevInnerMapSpec *ebpf.MapSpec
 
@@ -278,6 +286,28 @@ func NewSourceRange6Map(maxEntries int) *bpf.Map {
 	)
 }
 
+func NewSourceRangeIndex4Map(maxEntries int) *bpf.Map {
+	return bpf.NewMap(
+		SourceRangeIndex4MapName,
+		ebpf.LPMTrie,
+		&SourceRangeIndexKey4{},
+		&SourceRangeIndexValue{},
+		maxEntries,
+		0,
+	)
+}
+
+func NewSourceRangeIndex6Map(maxEntries int) *bpf.Map {
+	return bpf.NewMap(
+		SourceRangeIndex6MapName,
+		ebpf.LPMTrie,
+		&SourceRangeIndexKey6{},
+		&SourceRangeIndexValue{},
+		maxEntries,
+		0,
+	)
+}
+
 func NewSockRevNat4Map(maxEntries int) *bpf.Map {
 	return bpf.NewMap(
 		SockRevNat4MapName,
@@ -356,6 +386,8 @@ func (r *BPFLBMaps) allMaps() ([]mapDesc, []mapDesc) {
 	affinityMap := mapDesc{&r.affinityMatchMap, NewAffinityMatchMap, r.Cfg.LBAffinityMapEntries}
 	v4SourceRangeMap := mapDesc{&r.sourceRange4Map, NewSourceRange4Map, r.Cfg.LBSourceRangeMapEntries}
 	v6SourceRangeMap := mapDesc{&r.sourceRange6Map, NewSourceRange6Map, r.Cfg.LBSourceRangeMapEntries}
+	v4SourceRangeIndexMap := mapDesc{&r.sourceRangeIndex4Map, NewSourceRangeIndex4Map, r.Cfg.LBSourceRangeMapEntries}
+	v6SourceRangeIndexMap := mapDesc{&r.sourceRangeIndex6Map, NewSourceRangeIndex6Map, r.Cfg.LBSourceRangeMapEntries}
 
 	mapsToCreate := []mapDesc{}
 	mapsToDelete := []mapDesc{}
@@ -363,14 +395,14 @@ func (r *BPFLBMaps) allMaps() ([]mapDesc, []mapDesc) {
 	mapsToCreate = append(mapsToCreate, affinityMap)
 
 	if r.ExtCfg.EnableIPv4 {
-		mapsToCreate = append(mapsToCreate, v4SourceRangeMap)
+		mapsToCreate = append(mapsToCreate, v4SourceRangeMap, v4SourceRangeIndexMap)
 	} else {
-		mapsToDelete = append(mapsToDelete, v4SourceRangeMap)
+		mapsToDelete = append(mapsToDelete, v4SourceRangeMap, v4SourceRangeIndexMap)
 	}
 	if r.ExtCfg.EnableIPv6 {
-		mapsToCreate = append(mapsToCreate, v6SourceRangeMap)
+		mapsToCreate = append(mapsToCreate, v6SourceRangeMap, v6SourceRangeIndexMap)
 	} else {
-		mapsToDelete = append(mapsToDelete, v6SourceRangeMap)
+		mapsToDelete = append(mapsToDelete, v6SourceRangeMap, v6SourceRangeIndexMap)
 	}
 
 	if r.ExtCfg.EnableIPv4 {
@@ -378,12 +410,14 @@ func (r *BPFLBMaps) allMaps() ([]mapDesc, []mapDesc) {
 	} else {
 		mapsToDelete = append(mapsToDelete, v4Maps...)
 		mapsToDelete = append(mapsToDelete, v4SourceRangeMap)
+		mapsToDelete = append(mapsToDelete, v4SourceRangeIndexMap)
 	}
 	if r.ExtCfg.EnableIPv6 {
 		mapsToCreate = append(mapsToCreate, v6Maps...)
 	} else {
 		mapsToDelete = append(mapsToDelete, v6Maps...)
 		mapsToDelete = append(mapsToDelete, v6SourceRangeMap)
+		mapsToDelete = append(mapsToDelete, v6SourceRangeIndexMap)
 	}
 	return mapsToCreate, mapsToDelete
 }
@@ -658,6 +692,40 @@ func (r *BPFLBMaps) UpdateSourceRange(key SourceRangeKey, value *SourceRangeValu
 	}
 }
 
+// DeleteSourceRangeIndex implements lbmaps.
+func (r *BPFLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
+	var err error
+	switch key.(type) {
+	case *SourceRangeIndexKey4:
+		_, err = r.sourceRangeIndex4Map.SilentDelete(key)
+	case *SourceRangeIndexKey6:
+		_, err = r.sourceRangeIndex6Map.SilentDelete(key)
+	default:
+		panic("unknown SourceRangeIndexKey")
+	}
+	return err
+}
+
+// DumpSourceRangeIndex implements lbmaps.
+func (r *BPFLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error {
+	return errors.Join(
+		dumpMap(r.sourceRangeIndex4Map, cb),
+		dumpMap(r.sourceRangeIndex6Map, cb),
+	)
+}
+
+// UpdateSourceRangeIndex implements lbmaps.
+func (r *BPFLBMaps) UpdateSourceRangeIndex(key SourceRangeIndexKey, value *SourceRangeIndexValue) error {
+	switch key.(type) {
+	case *SourceRangeIndexKey4:
+		return r.sourceRangeIndex4Map.Update(key, value)
+	case *SourceRangeIndexKey6:
+		return r.sourceRangeIndex6Map.Update(key, value)
+	default:
+		panic("unknown SourceRangeIndexKey")
+	}
+}
+
 // UpdateMaglev implements lbmaps.
 func (r *BPFLBMaps) UpdateMaglev(key MaglevOuterKey, backendIDs []loadbalancer.BackendID, ipv6 bool) error {
 	inner, err := ebpf.NewMap(r.maglevInnerMapSpec)
@@ -890,6 +958,30 @@ func (f *FaultyLBMaps) UpdateSourceRange(key SourceRangeKey, value *SourceRangeV
 	return f.impl.UpdateSourceRange(key, value)
 }
 
+// DeleteSourceRangeIndex implements lbmaps.
+func (f *FaultyLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
+	if f.isFaulty() {
+		return errFaulty
+	}
+	return f.impl.DeleteSourceRangeIndex(key)
+}
+
+// DumpSourceRangeIndex implements lbmaps.
+func (f *FaultyLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error {
+	if f.isFaulty() {
+		return errFaulty
+	}
+	return f.impl.DumpSourceRangeIndex(cb)
+}
+
+// UpdateSourceRangeIndex implements lbmaps.
+func (f *FaultyLBMaps) UpdateSourceRangeIndex(key SourceRangeIndexKey, value *SourceRangeIndexValue) error {
+	if f.isFaulty() {
+		return errFaulty
+	}
+	return f.impl.UpdateSourceRangeIndex(key, value)
+}
+
 // DeleteAffinityMatch implements lbmaps.
 func (f *FaultyLBMaps) DeleteAffinityMatch(key *AffinityMatchKey) error {
 	if f.isFaulty() {
@@ -1100,17 +1192,18 @@ func dumpFakeBPFMap[K any, V any](m *fakeBPFMap, cb func(K, V)) {
 }
 
 type FakeLBMaps struct {
-	pin        fakeBPFMap
-	aff        fakeBPFMap
-	be         fakeBPFMap
-	svc        fakeBPFMap
-	revNat     fakeBPFMap
-	sockRevNat fakeBPFMap
-	srcRange   fakeBPFMap
-	mglv4      fakeBPFMap
-	mglv6      fakeBPFMap
-	inners     lock.Map[uint32, *fakeBPFMap]
-	nextID     uint32
+	pin         fakeBPFMap
+	aff         fakeBPFMap
+	be          fakeBPFMap
+	svc         fakeBPFMap
+	revNat      fakeBPFMap
+	sockRevNat  fakeBPFMap
+	srcRange    fakeBPFMap
+	srcRangeIdx fakeBPFMap
+	mglv4       fakeBPFMap
+	mglv6       fakeBPFMap
+	inners      lock.Map[uint32, *fakeBPFMap]
+	nextID      uint32
 }
 
 func NewFakeLBMaps() LBMaps {
@@ -1145,6 +1238,11 @@ func (f *FakeLBMaps) DeleteService(key ServiceKey) error {
 // DeleteSourceRange implements lbmaps.
 func (f *FakeLBMaps) DeleteSourceRange(key SourceRangeKey) error {
 	return f.srcRange.delete(key)
+}
+
+// DeleteSourceRangeIndex implements lbmaps.
+func (f *FakeLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
+	return f.srcRangeIdx.delete(key)
 }
 
 // DumpPinning4 implements lbmaps.
@@ -1183,6 +1281,12 @@ func (f *FakeLBMaps) DumpSourceRange(cb func(SourceRangeKey, *SourceRangeValue))
 	return nil
 }
 
+// DumpSourceRangeIndex implements lbmaps.
+func (f *FakeLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error {
+	dumpFakeBPFMap(&f.srcRangeIdx, cb)
+	return nil
+}
+
 // UpdatePinning4 implements lbmaps.
 func (f *FakeLBMaps) UpdatePinning4(key *LbPinning4Key, value *LbPinning4Value) error {
 	return f.pin.update(key, value)
@@ -1211,6 +1315,11 @@ func (f *FakeLBMaps) UpdateService(key ServiceKey, value ServiceValue) error {
 // UpdateSourceRange implements lbmaps.
 func (f *FakeLBMaps) UpdateSourceRange(key SourceRangeKey, value *SourceRangeValue) error {
 	return f.srcRange.update(key, value)
+}
+
+// UpdateSourceRangeIndex implements lbmaps.
+func (f *FakeLBMaps) UpdateSourceRangeIndex(key SourceRangeIndexKey, value *SourceRangeIndexValue) error {
+	return f.srcRangeIdx.update(key, value)
 }
 
 // UpdateMaglev implements lbmaps.

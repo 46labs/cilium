@@ -98,9 +98,10 @@ func ToSVCForwardingMode(s string, proto ...uint8) SVCForwardingMode {
 type SVCLoadBalancingAlgorithm uint8
 
 const (
-	SVCLoadBalancingAlgorithmUndef  SVCLoadBalancingAlgorithm = 0
-	SVCLoadBalancingAlgorithmRandom SVCLoadBalancingAlgorithm = 1
-	SVCLoadBalancingAlgorithmMaglev SVCLoadBalancingAlgorithm = 2
+	SVCLoadBalancingAlgorithmUndef            SVCLoadBalancingAlgorithm = 0
+	SVCLoadBalancingAlgorithmRandom           SVCLoadBalancingAlgorithm = 1
+	SVCLoadBalancingAlgorithmMaglev           SVCLoadBalancingAlgorithm = 2
+	SVCLoadBalancingAlgorithmSourceRangeIndex SVCLoadBalancingAlgorithm = 4
 )
 
 func (d SVCLoadBalancingAlgorithm) String() string {
@@ -109,6 +110,8 @@ func (d SVCLoadBalancingAlgorithm) String() string {
 		return "random"
 	case SVCLoadBalancingAlgorithmMaglev:
 		return "maglev"
+	case SVCLoadBalancingAlgorithmSourceRangeIndex:
+		return "source-range-index"
 	default:
 		return "undef"
 	}

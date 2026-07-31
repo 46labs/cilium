@@ -1453,6 +1453,134 @@ func TestBPFOps(t *testing.T) {
 	}
 }
 
+func TestBPFOpsSourceRangeIndexes(t *testing.T) {
+	lc := hivetest.Lifecycle(t)
+	log := hivetest.Logger(t)
+
+	maglevCfg, err := maglev.UserConfig{
+		TableSize: 1021,
+		HashSeed:  maglev.DefaultHashSeed,
+	}.ToConfig()
+	require.NoError(t, err, "ToConfig")
+	maglev := maglev.New(maglevCfg, lc)
+
+	extCfg := loadbalancer.ExternalConfig{
+		ZoneMapper:           &option.DaemonConfig{},
+		EnableIPv4:           true,
+		EnableIPv6:           true,
+		KubeProxyReplacement: true,
+		DefaultLBServiceIPAM: "lbipam",
+		EnableLBIPAM:         true,
+		EnableNodeIPAM:       false,
+	}
+
+	cfg, _ := loadbalancer.NewConfig(log, loadbalancer.DefaultUserConfig, loadbalancer.DeprecatedConfig{}, &option.DaemonConfig{})
+	cfg.AlgorithmAnnotation = false
+
+	lbmaps := maps.NewFakeLBMaps()
+
+	db := statedb.New()
+	nodeAddrs, err := tables.NewNodeAddressTable(db)
+	require.NoError(t, err)
+	wtxn := db.WriteTxn(nodeAddrs)
+	for _, n := range nodePortAddrs {
+		na := tables.NodeAddress{
+			Addr:       n,
+			NodePort:   true,
+			Primary:    true,
+			DeviceName: "lol0",
+		}
+		_, _, err := nodeAddrs.Insert(wtxn, na)
+		require.NoError(t, err)
+	}
+	wtxn.Commit()
+
+	ops := newBPFOps(bpfOpsParams{
+		Lifecycle:      lc,
+		Log:            log,
+		Config:         cfg,
+		ExternalConfig: extCfg,
+		LBMaps:         lbmaps,
+		Maglev:         maglev,
+		DB:             db,
+		NodeAddresses:  nodeAddrs,
+		CTMapGC:        ctmap.NewFakeGCRunner(),
+	})
+
+	beSeq := func(bes ...loadbalancer.Backend) loadbalancer.BackendsSeq2 {
+		return func(yield func(*loadbalancer.Backend, statedb.Revision) bool) {
+			for i := range bes {
+				bes[i].ServiceName = loadbalancer.ServiceName{}
+				if !yield(&bes[i], statedb.Revision(i+1)) {
+					return
+				}
+			}
+		}
+	}
+
+	countLines := func(substr string) int {
+		n := 0
+		for _, line := range dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false) {
+			if strings.Contains(line, substr) {
+				n++
+			}
+		}
+		return n
+	}
+
+	newNodePort := func(srcIndexes []loadbalancer.SourceRangeIndexEntry) *loadbalancer.Frontend {
+		svc := baseService
+		svc.SourceRangeIndexes = srcIndexes
+		fe := baseFrontend
+		fe.Type = NodePort
+		fe.Address = frontendAddrs[0]
+		fe.Service = &svc
+		fe.Backends = beSeq(baseBackend, newTestBackend(backend2, loadbalancer.BackendStateActive))
+		return &fe
+	}
+
+	// The source range index algorithm is enabled by the annotation itself,
+	// independently of the global algorithm annotation option (which is off here).
+	fe := newNodePort([]loadbalancer.SourceRangeIndexEntry{
+		{Index: 0, Prefix: netip.MustParsePrefix("10.0.0.0/8")},
+		{Index: 1, Prefix: netip.MustParsePrefix("20.0.0.0/8"), Port: 5060},
+	})
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, fe), "Update")
+
+	// The algorithm is applied to both the service and the nodeport frontend.
+	require.Equal(t, 2, countLines("LBALG=source-range-index"), "algorithm not applied to all frontends")
+	// Each frontend gets one entry per source range index group.
+	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 IDX=0"), "exact entry missing")
+	require.Equal(t, 2, countLines("CIDR=20.0.0.0/8:5060 IDX=1"), "port-restricted entry missing")
+
+	// Prune must not delete entries that are part of the current set.
+	require.NoError(t, ops.Prune(context.TODO(), nil, nil), "Prune")
+	require.Equal(t, 4, countLines("SRCRANGEIDX:"), "Prune removed current entries")
+
+	// Dropping the annotation removes the entries via orphan cleanup.
+	fe.Service.SourceRangeIndexes = nil
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, fe), "Update without indexes")
+	require.Equal(t, 0, countLines("SRCRANGEIDX:"), "orphan source range indexes not cleaned up")
+
+	// ClusterIP frontends are excluded from the source range index algorithm.
+	svc := baseService
+	svc.SourceRangeIndexes = []loadbalancer.SourceRangeIndexEntry{
+		{Index: 0, Prefix: netip.MustParsePrefix("10.0.0.0/8")},
+	}
+	feCluster := baseFrontend
+	feCluster.Type = ClusterIP
+	feCluster.Address = extraFrontend
+	feCluster.Service = &svc
+	feCluster.Backends = beSeq(baseBackend)
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &feCluster), "Update ClusterIP")
+	require.Equal(t, 0, countLines("LBALG=source-range-index"), "ClusterIP frontend must not use the algorithm")
+
+	for _, del := range []*loadbalancer.Frontend{fe, &feCluster} {
+		require.NoError(t, ops.Delete(context.TODO(), nil, 0, del), "Delete")
+	}
+	require.Empty(t, dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false), "BPF maps not empty")
+}
+
 // showMaps formats the map dumps as the Go code expected in the test cases.
 func showMaps(m []maps.MapDump) string {
 	var w strings.Builder

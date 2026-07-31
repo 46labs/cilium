@@ -150,6 +150,23 @@ func DumpLBMaps(lbmaps LBMaps, sanitizeIDs bool, customizeAddr func(types.AddrCl
 		panic(err)
 	}
 
+	srcRangeIdxCB := func(key SourceRangeIndexKey, value *SourceRangeIndexValue) {
+		key = key.ToHost()
+		portS := ""
+		if key.GetPort() != 0 {
+			portS = fmt.Sprintf(":%d", key.GetPort())
+		}
+		out = append(out, fmt.Sprintf("SRCRANGEIDX: ID=%s CIDR=%s%s IDX=%d",
+			sanitizeID(key.GetRevNATID(), sanitizeIDs),
+			key.GetCIDR(),
+			portS,
+			value.Index,
+		))
+	}
+	if err := lbmaps.DumpSourceRangeIndex(srcRangeIdxCB); err != nil {
+		panic(err)
+	}
+
 	maglevCB := func(key MaglevOuterKey, _ MaglevOuterVal, _ MaglevInnerKey, innerValue *MaglevInnerVal, _ bool) {
 		key = MaglevOuterKey{
 			RevNatID: byteorder.NetworkToHost16(key.RevNatID),
