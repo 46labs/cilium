@@ -1502,17 +1502,17 @@ func (ops *BPFOps) orphanBackends(frontend loadbalancer.L3n4Addr, backends sets.
 	return orphans
 }
 
-func getCtNatAddrs(orphanBackends []backendState) map[netip.Addr]struct{} {
-	ctNatAddrs := map[netip.Addr]struct{}{}
+func getCtNatAddrs(orphanBackends []backendState) map[netip.AddrPort]struct{} {
+	ctNatAddrs := map[netip.AddrPort]struct{}{}
 
 	for _, orphanState := range orphanBackends {
-		ctNatAddrs[orphanState.addr.Addr()] = struct{}{}
+		ctNatAddrs[netip.AddrPortFrom(orphanState.addr.Addr(), orphanState.addr.Port())] = struct{}{}
 	}
 
 	return ctNatAddrs
 }
 
-func (ops *BPFOps) cleanCtNat(ctNatAddrs map[netip.Addr]struct{}) {
+func (ops *BPFOps) cleanCtNat(ctNatAddrs map[netip.AddrPort]struct{}) {
 	if len(ctNatAddrs) == 0 {
 		return
 	}

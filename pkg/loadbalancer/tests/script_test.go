@@ -41,6 +41,7 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer/writer"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/node/addressing"
@@ -113,6 +114,7 @@ func TestScript(t *testing.T) {
 					func(ops *lbreconciler.BPFOps, lns *node.LocalNodeStore, w *writer.Writer, waitFn loadbalancer.InitWaitFunc) uhive.ScriptCmdsOut {
 						return uhive.NewScriptCmds(testCommands{w, lns, ops, waitFn}.cmds())
 					},
+					ctmap.NewFakeGCRunner,
 				),
 
 				lbcell.Cell,

@@ -38,6 +38,7 @@ import (
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
@@ -105,6 +106,7 @@ func TestScript(t *testing.T) {
 						}
 						return &fakeSkipLBMap{}
 					},
+					ctmap.NewFakeGCRunner,
 				),
 			)
 
