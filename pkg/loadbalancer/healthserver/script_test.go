@@ -42,6 +42,7 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer/writer"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
@@ -110,6 +111,7 @@ func TestScript(t *testing.T) {
 							KubeProxyReplacement: true,
 						}
 					},
+					ctmap.NewFakeGCRunner,
 				),
 				cell.Invoke(func(w *writer.Writer) {
 					svcWriter = w

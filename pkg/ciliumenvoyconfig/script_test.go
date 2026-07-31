@@ -52,6 +52,7 @@ import (
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/nodeipamconfig"
@@ -108,6 +109,7 @@ func TestScript(t *testing.T) {
 				func() *loadbalancer.TestConfig {
 					return &loadbalancer.TestConfig{}
 				},
+				ctmap.NewFakeGCRunner,
 			),
 
 			// cecResourceParser and its friends.

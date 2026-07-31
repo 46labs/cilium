@@ -24,6 +24,7 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/loadbalancer/maps"
 	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/testutils"
@@ -1417,6 +1418,7 @@ func TestBPFOps(t *testing.T) {
 					Maglev:         maglev,
 					DB:             db,
 					NodeAddresses:  nodeAddrs,
+					CTMapGC:        ctmap.NewFakeGCRunner(),
 				}
 
 				ops := newBPFOps(p)
@@ -1443,6 +1445,7 @@ func TestBPFOps(t *testing.T) {
 				Maglev:         maglev,
 				DB:             db,
 				NodeAddresses:  nodeAddrs,
+				CTMapGC:        ctmap.NewFakeGCRunner(),
 			}
 			ops := newBPFOps(p)
 			runTests(ops, setWithAlgo.testCaseSet, setWithAlgo.algo, addr, true)
