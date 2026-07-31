@@ -6,6 +6,7 @@ package loadbalancer
 import (
 	"fmt"
 	"maps"
+	"math"
 	"net/netip"
 	"slices"
 	"sort"
@@ -87,12 +88,141 @@ type Service struct {
 	// client addresses.
 	SourceRanges []netip.Prefix
 
+	// SourceRangeIndexes if non-empty maps client source CIDRs (optionally
+	// restricted to a client source port) to a deterministic backend selection
+	// index. Entries sharing an Index form a trunk group; the backend selected
+	// for a matching client is computed as index % backend-count.
+	SourceRangeIndexes []SourceRangeIndexEntry
+
 	// PortNames maps a port name to a port number.
 	PortNames map[string]uint16
 
 	// TrafficDistribution if not default will influence how backends are chosen for
 	// frontends associated with this service.
 	TrafficDistribution TrafficDistribution
+}
+
+type SourceRangeIndexEntry struct {
+	// Index is the trunk group index shared by all client source CIDRs of the
+	// group; see SourceRangeIndexes for how it selects a backend.
+	Index uint8
+
+	// Prefix is the client source CIDR this entry applies to.
+	Prefix netip.Prefix
+
+	// Port if non-zero restricts this entry to the given client source port.
+	// A zero port matches any client source port.
+	Port uint16
+}
+
+func (e SourceRangeIndexEntry) String() string {
+	if e.Port != 0 {
+		return fmt.Sprintf("%d:%s:%d", e.Index, e.Prefix, e.Port)
+	}
+	return fmt.Sprintf("%d:%s", e.Index, e.Prefix)
+}
+
+// ParseSourceRangeIndexes parses the value of the
+// ServiceSourceRangeIndex annotation into source range index entries.
+//
+// The value is a semicolon-separated list of trunk groups. Each group is a
+// comma-separated list of "CIDR[:port]" entries, where each entry carries its
+// own optional client source port. All entries of a group share the group
+// index, which is the position of the group in the list.
+func ParseSourceRangeIndexes(value string) ([]SourceRangeIndexEntry, error) {
+	var result []SourceRangeIndexEntry
+
+	groupIndex := 0
+	for _, group := range strings.Split(value, ";") {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if groupIndex > math.MaxUint8 {
+			return nil, fmt.Errorf("too many source range index groups: %d", groupIndex)
+		}
+
+		for _, entry := range strings.Split(group, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				return nil, fmt.Errorf("invalid source range index group %q: empty entry", group)
+			}
+
+			addrPart, portPart, err := splitSourceRangeAddrPort(entry)
+			if err != nil {
+				return nil, err
+			}
+
+			var port uint16
+			if portPart != "" {
+				p, err := strconv.ParseUint(portPart, 10, 16)
+				if err != nil {
+					return nil, fmt.Errorf("invalid source range index port %q: %w", portPart, err)
+				}
+				port = uint16(p)
+			}
+
+			prefix, err := parseSourceRangePrefix(addrPart)
+			if err != nil {
+				return nil, err
+			}
+
+			result = append(result, SourceRangeIndexEntry{
+				Index:  uint8(groupIndex),
+				Prefix: prefix,
+				Port:   port,
+			})
+		}
+		groupIndex++
+	}
+
+	return result, nil
+}
+
+// splitSourceRangeAddrPort splits a "CIDR[:port]" entry into its address part
+// and, if present, its port part. Bracketed IPv6 addresses, e.g.
+// "[fd00::1]/128:5060", are supported.
+func splitSourceRangeAddrPort(entry string) (addrPart, portPart string, err error) {
+	addrPart, portPart = entry, ""
+
+	// A bracketed IPv6 address, e.g. "[fd00::1]/128:5060".
+	if strings.HasPrefix(entry, "[") {
+		end := strings.Index(entry, "]")
+		if end < 0 {
+			return "", "", fmt.Errorf("invalid IPv6 address in %q: missing closing bracket", entry)
+		}
+		rest := entry[end+1:]
+		addrPart = entry[1:end] + rest
+		if i := strings.LastIndex(rest, ":"); i >= 0 {
+			addrPart = entry[1:end] + rest[:i]
+			portPart = rest[i+1:]
+		}
+		return addrPart, portPart, nil
+	}
+
+	if i := strings.LastIndex(entry, ":"); i >= 0 {
+		// Only treat the suffix as a port if it parses as one, otherwise
+		// an unbracketed IPv6 address is assumed, e.g. "fd00::1/128".
+		if _, parseErr := strconv.ParseUint(entry[i+1:], 10, 16); parseErr == nil {
+			addrPart = entry[:i]
+			portPart = entry[i+1:]
+		}
+	}
+	return addrPart, portPart, nil
+}
+
+// parseSourceRangePrefix parses a CIDR, allowing a bare IP which defaults to a
+// full-length prefix.
+func parseSourceRangePrefix(addrPart string) (netip.Prefix, error) {
+	prefix, err := netip.ParsePrefix(addrPart)
+	if err != nil {
+		// Allow a bare IP, defaulting to a full-length prefix.
+		if ip, ipErr := netip.ParseAddr(addrPart); ipErr == nil {
+			return netip.PrefixFrom(ip, ip.BitLen()), nil
+		}
+		return netip.Prefix{}, fmt.Errorf("invalid source range index entry %q: %w", addrPart, err)
+	}
+	return prefix.Masked(), nil
 }
 
 type TrafficDistribution string
@@ -222,6 +352,14 @@ func (svc *Service) TableRow() []string {
 			ss[i] = cidrs[i].String()
 		}
 		flags = append(flags, "SourceRanges="+strings.Join(ss, ", "))
+	}
+
+	if len(svc.SourceRangeIndexes) > 0 {
+		entries := make([]string, len(svc.SourceRangeIndexes))
+		for i := range svc.SourceRangeIndexes {
+			entries[i] = svc.SourceRangeIndexes[i].String()
+		}
+		flags = append(flags, "SourceRangeIndexes="+strings.Join(entries, ", "))
 	}
 
 	if p := svc.GetSourceRangesPolicy(); p == SVCSourceRangesPolicyDeny {

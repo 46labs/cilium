@@ -69,6 +69,7 @@ test/echo  [2002::2]:8080/TCP
   "HealthCheckNodePort": 0,
   "LoopbackHostPort": false,
   "SourceRanges": null,
+  "SourceRangeIndexes": null,
   "PortNames": {
     "http": 80
   },
@@ -220,6 +221,7 @@ proxyredirect: null
 healthchecknodeport: 0
 loopbackhostport: false
 sourceranges: []
+sourcerangeindexes: []
 portnames:
     http: 80
 trafficdistribution: ""

@@ -68,6 +68,8 @@ var (
 		"lb_affinity_val":         {lbmap.AffinityValue{}},
 		"lb4_src_range_key":       {lbmap.SourceRangeKey4{}},
 		"lb6_src_range_key":       {lbmap.SourceRangeKey6{}},
+		"lb4_src_range_idx_key":   {lbmap.SourceRangeIndexKey4{}},
+		"lb6_src_range_idx_key":   {lbmap.SourceRangeIndexKey6{}},
 		"edt_id":                  {bwmap.EdtId{}},
 		"edt_info":                {bwmap.EdtInfo{}},
 		"egress_gw_policy_key":    {egressmap.EgressPolicyKey4{}},
