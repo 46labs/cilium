@@ -3010,6 +3010,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 				ipv4_ct_tuple_swap_ports(&nat_tuple);
 				state = snat_v4_lookup(&nat_tuple);
 				if (state != NULL) {
+					ctx_store_meta(ctx, CB_SRC_LABEL, src_sec_identity);
 					return tail_call_internal(ctx, CILIUM_CALL_IPV4_NODEPORT_NAT_INGRESS, ext_err);
 				}
 			}
