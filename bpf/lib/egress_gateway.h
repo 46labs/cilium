@@ -13,8 +13,13 @@
 struct egress_gw_policy_key {
 	struct bpf_lpm_trie_key lpm_key;
 	__be32 saddr;
+	/* TOS directly after saddr so it is always within the matched prefix. */
+	__u8 tos;
 	__be32 daddr;
-};
+	/* Beyond the matched prefix; marks an entry with a pinned TOS of 0. */
+	__u8 has_tos;
+	__u8 pad[2];
+} __packed;
 
 struct egress_gw_policy_entry {
 	__be32 egress_ip;
@@ -67,6 +72,8 @@ struct {
 #define EGRESS_PREFIX_LEN_V6(PREFIX) (EGRESS_STATIC_PREFIX_V6 + (PREFIX))
 #define EGRESS_IPV4_PREFIX EGRESS_PREFIX_LEN_V4(32)
 #define EGRESS_IPV6_PREFIX EGRESS_PREFIX_LEN_V6(128)
+/* Max entry prefix: [saddr | tos | daddr], i.e. 32 + 8 + dest_prefix_bits. */
+#define EGRESS_IPV4_TOS_PREFIX (EGRESS_IPV4_PREFIX + 8)
 
 /* These are special IP values in the CIDR 0.0.0.0/8 range that map to specific
  * case for in the egress gateway policies handling.
@@ -117,26 +124,40 @@ int egress_gw_fib_lookup_and_redirect(struct __ctx_buff *ctx, __be32 egress_ip, 
 
 # ifdef ENABLE_EGRESS_GATEWAY
 static __always_inline const struct egress_gw_policy_entry *
-lookup_ip4_egress_gw_policy(__be32 saddr, __be32 daddr)
+lookup_ip4_egress_gw_policy(__be32 saddr, __be32 daddr, __u8 tos)
 {
+	const struct egress_gw_policy_entry *egw;
 	struct egress_gw_policy_key key = {
-		.lpm_key = { EGRESS_IPV4_PREFIX, {} },
+		.lpm_key = { EGRESS_IPV4_TOS_PREFIX, {} },
 		.saddr = saddr,
 		.daddr = daddr,
+		.tos = tos,
 	};
-	return map_lookup_elem(&cilium_egress_gw_policy_v4, &key);
+
+	/* First try to match an entry that pins the packet's TOS byte. If that
+	 * misses, fall back to an entry with a pinned TOS of 0 (or a plain entry
+	 * without a pinned TOS) via a second lookup.
+	 */
+	egw = map_lookup_elem(&cilium_egress_gw_policy_v4, &key);
+	if (!egw && tos) {
+		key.tos = 0;
+		egw = map_lookup_elem(&cilium_egress_gw_policy_v4, &key);
+	}
+	return egw;
 }
 # endif /* ENABLE_EGRESS_GATEWAY */
 
 static __always_inline int
 egress_gw_request_needs_redirect(struct ipv4_ct_tuple *rtuple __maybe_unused,
+				 __u8 tos __maybe_unused,
 				 __be32 *gateway_ip __maybe_unused)
 {
 #if defined(ENABLE_EGRESS_GATEWAY)
 	const struct egress_gw_policy_entry *egress_gw_policy;
 
 	egress_gw_policy = lookup_ip4_egress_gw_policy(ipv4_ct_reverse_tuple_saddr(rtuple),
-						       ipv4_ct_reverse_tuple_daddr(rtuple));
+						       ipv4_ct_reverse_tuple_daddr(rtuple),
+						       tos);
 	if (!egress_gw_policy)
 		return CTX_ACT_OK;
 
@@ -161,7 +182,7 @@ bool egress_gw_sip_inspection_needed(__be32 saddr __maybe_unused,
 {
 	const struct egress_gw_policy_entry *egress_gw_policy;
 
-	egress_gw_policy = lookup_ip4_egress_gw_policy(saddr, daddr);
+	egress_gw_policy = lookup_ip4_egress_gw_policy(saddr, daddr, 0);
 	if (!egress_gw_policy)
 		return false;
 
@@ -176,6 +197,7 @@ bool egress_gw_sip_inspection_needed(__be32 saddr __maybe_unused,
 static __always_inline bool
 egress_gw_snat_needed(__be32 saddr __maybe_unused,
 		      __be32 daddr __maybe_unused,
+		      __u8 tos __maybe_unused,
 		      __be32 *snat_addr __maybe_unused,
 		      __u32 *egress_ifindex __maybe_unused,
 		      __u8 *sip_inspect __maybe_unused,
@@ -184,7 +206,7 @@ egress_gw_snat_needed(__be32 saddr __maybe_unused,
 #if defined(ENABLE_EGRESS_GATEWAY)
 	const struct egress_gw_policy_entry *egress_gw_policy;
 
-	egress_gw_policy = lookup_ip4_egress_gw_policy(saddr, daddr);
+	egress_gw_policy = lookup_ip4_egress_gw_policy(saddr, daddr, tos);
 	if (!egress_gw_policy)
 		return false;
 
@@ -212,7 +234,7 @@ bool egress_gw_reply_matches_policy(struct iphdr *ip4 __maybe_unused)
 	const struct egress_gw_policy_entry *egress_policy;
 
 	/* Find a matching policy by looking up the reverse address tuple: */
-	egress_policy = lookup_ip4_egress_gw_policy(ip4->daddr, ip4->saddr);
+	egress_policy = lookup_ip4_egress_gw_policy(ip4->daddr, ip4->saddr, ip4->tos);
 	if (!egress_policy)
 		return false;
 
@@ -228,6 +250,7 @@ bool egress_gw_reply_matches_policy(struct iphdr *ip4 __maybe_unused)
 
 /** Match a packet against EGW policy map, and return the gateway's IP.
  * @arg rtuple		CT tuple for the packet
+ * @arg tos		IPv4 TOS byte of the packet
  * @arg gateway_ip	returns the gateway node's IP
  *
  * Returns
@@ -237,14 +260,16 @@ bool egress_gw_reply_matches_policy(struct iphdr *ip4 __maybe_unused)
  */
 static __always_inline int
 egress_gw_request_needs_redirect_hook(struct ipv4_ct_tuple *rtuple,
+				      __u8 tos,
 				      __be32 *gateway_ip)
 {
-	return egress_gw_request_needs_redirect(rtuple, gateway_ip);
+	return egress_gw_request_needs_redirect(rtuple, tos, gateway_ip);
 }
 
 static __always_inline
-bool egress_gw_snat_needed_hook(__be32 saddr, __be32 daddr, __be32 *snat_addr,
-				__u32 *egress_ifindex, __u8 *sip_needed, __u16 *sip_port)
+bool egress_gw_snat_needed_hook(__be32 saddr, __be32 daddr, __u8 tos,
+				__be32 *snat_addr, __u32 *egress_ifindex,
+				__u8 *sip_needed, __u16 *sip_port)
 {
 	const struct remote_endpoint_info *remote_ep;
 
@@ -257,7 +282,8 @@ bool egress_gw_snat_needed_hook(__be32 saddr, __be32 daddr, __be32 *snat_addr,
 	    identity_is_cluster(remote_ep->sec_identity))
 		return false;
 
-	return egress_gw_snat_needed(saddr, daddr, snat_addr, egress_ifindex, sip_needed, sip_port);
+	return egress_gw_snat_needed(saddr, daddr, tos, snat_addr, egress_ifindex,
+				     sip_needed, sip_port);
 }
 
 static __always_inline
@@ -282,7 +308,7 @@ bool egress_gw_reply_needs_redirect_hook(struct iphdr *ip4, __u32 *tunnel_endpoi
 
 static __always_inline
 int egress_gw_handle_packet(struct ipv4_ct_tuple *tuple,
-			    __u32 dst_sec_identity, __be32 *gateway_ip)
+			    __u32 dst_sec_identity, __u8 tos, __be32 *gateway_ip)
 {
 	/* If the packet is destined to an entity inside the cluster,
 	 * either EP or node, it should not be forwarded to an egress
@@ -292,7 +318,7 @@ int egress_gw_handle_packet(struct ipv4_ct_tuple *tuple,
 	if (identity_is_cluster(dst_sec_identity))
 		return CTX_ACT_OK;
 
-	return egress_gw_request_needs_redirect_hook(tuple, gateway_ip);
+	return egress_gw_request_needs_redirect_hook(tuple, tos, gateway_ip);
 }
 
 #ifdef ENABLE_IPV6
@@ -549,7 +575,7 @@ int egress_gw_handle_request(struct __ctx_buff *ctx, __be16 proto,
 		/* lower-level code expects CT tuple to be flipped: */
 		__ipv4_ct_tuple_reverse(&tuple4);
 		ret = egress_gw_handle_packet(&tuple4, dst_sec_identity,
-					      &gateway_ip);
+					      ip4->tos, &gateway_ip);
 		break;
 #if defined(ENABLE_IPV6)
 	case bpf_htons(ETH_P_IPV6):

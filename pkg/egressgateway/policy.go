@@ -38,6 +38,8 @@ type policyGatewayConfig struct {
 	sipPort      uint16
 	sipInspect   bool
 	svcPinning   bool
+	tos          uint8
+	tosSet       bool
 }
 
 // gatewayConfig is the gateway configuration derived at runtime from a policy.
@@ -68,6 +70,9 @@ type gatewayConfig struct {
 	sipPort uint16
 	// svcPinning is used for dynamic egress gateway node selection based on service pinning
 	svcPinning bool
+	// tos is the TOS byte pinned by the policy (if tosSet is true)
+	tos    uint8
+	tosSet bool
 }
 
 // PolicyConfig is the internal representation of CiliumEgressGatewayPolicy.
@@ -85,6 +90,8 @@ type PolicyConfig struct {
 	v6Needed          bool
 	sipInspect        bool
 	sipPort           uint16
+	tos               uint8
+	tosSet            bool
 }
 
 // PolicyID includes policy name and namespace
@@ -149,6 +156,8 @@ func (config *PolicyConfig) regenerateGatewayConfig(manager *Manager) {
 			sipInspect: policyGwc.sipInspect,
 			sipPort:    policyGwc.sipPort,
 			svcPinning: policyGwc.svcPinning,
+			tos:        policyGwc.tos,
+			tosSet:     policyGwc.tosSet,
 		}
 
 		if policyGwc.svcPinning && policyGwc.egressIP.Is4() {
@@ -226,6 +235,8 @@ func (gwc *gatewayConfig) deriveFromPolicyGatewayConfig(logger *slog.Logger, gc 
 	gwc.sipInspect = gc.sipInspect
 	gwc.sipPort = gc.sipPort
 	gwc.svcPinning = gc.svcPinning
+	gwc.tos = gc.tos
+	gwc.tosSet = gc.tosSet
 
 	logger.Debug("Got a egw policy with egressIP",
 		logfields.EgressIP, gc.egressIP,
@@ -367,7 +378,7 @@ func (config *PolicyConfig) forEachEndpointAndCIDR(f func(netip.Addr, netip.Pref
 	}
 }
 
-func parseEgressGateway(egressGateway *v2.EgressGateway, svcPinning bool, sipPort uint16, sipInspect bool) (*policyGatewayConfig, error) {
+func parseEgressGateway(egressGateway *v2.EgressGateway, svcPinning bool, sipPort uint16, sipInspect bool, tos uint8, tosSet bool) (*policyGatewayConfig, error) {
 	if egressGateway == nil {
 		return nil, fmt.Errorf("egressGateway can't be empty")
 	}
@@ -386,6 +397,8 @@ func parseEgressGateway(egressGateway *v2.EgressGateway, svcPinning bool, sipPor
 		sipPort:      sipPort,
 		sipInspect:   sipInspect,
 		svcPinning:   svcPinning,
+		tos:          tos,
+		tosSet:       tosSet,
 	}
 
 	// EgressIP is not a required field, validate and parse it only if non-empty
@@ -407,7 +420,7 @@ func parseEgressGateway(egressGateway *v2.EgressGateway, svcPinning bool, sipPor
 
 // ParseCEGP takes a CiliumEgressGatewayPolicy CR and converts to PolicyConfig,
 // the internal representation of the egress gateway policy
-func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
+func ParseCEGP(logger *slog.Logger, cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 	var endpointSelectorList []*policyTypes.LabelSelector
 	var nodeSelectorList []*policyTypes.LabelSelector
 	var dstCidrList []netip.Prefix
@@ -417,6 +430,8 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 	var sipInspect = false
 	var sipPort uint16 = 5060
 	var svcPinning = false
+	var tos uint8 = 0
+	var tosSet = false
 
 	allowAllNamespacesRequirement := slim_metav1.LabelSelectorRequirement{
 		Key:      k8sConst.PodNamespaceLabel,
@@ -445,13 +460,27 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		svcPinning = true
 	}
 
+	if value, ret := cegp.Annotations[annotation.ServiceTOS]; ret {
+		parsedTos, err := strconv.ParseUint(value, 0, 8)
+		if err != nil {
+			logger.Warn("Ignoring invalid TOS annotation",
+				logfields.CiliumEgressGatewayPolicyName, name,
+				logfields.Tos, value,
+				logfields.Error, err,
+			)
+		} else {
+			tos = uint8(parsedTos)
+			tosSet = true
+		}
+	}
+
 	destinationCIDRs := cegp.Spec.DestinationCIDRs
 	if destinationCIDRs == nil {
 		return nil, fmt.Errorf("destinationCIDRs can't be empty")
 	}
 
 	for _, egressGateway := range cegp.Spec.EgressGateways {
-		policyGwc, err := parseEgressGateway(&egressGateway, svcPinning, sipPort, sipInspect)
+		policyGwc, err := parseEgressGateway(&egressGateway, svcPinning, sipPort, sipInspect, tos, tosSet)
 		if err != nil {
 			return nil, err
 		}
@@ -461,7 +490,7 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 	// If there are any elements in EgressGateways skip the EgressGateway field.
 	if len(policyGwConfigs) == 0 {
 		egressGateway := cegp.Spec.EgressGateway
-		policyGwc, err := parseEgressGateway(egressGateway, svcPinning, sipPort, sipInspect)
+		policyGwc, err := parseEgressGateway(egressGateway, svcPinning, sipPort, sipInspect, tos, tosSet)
 		if err != nil {
 			return nil, err
 		}
@@ -539,6 +568,8 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		v6Needed:          v6Needed,
 		sipInspect:        sipInspect,
 		sipPort:           sipPort,
+		tos:               tos,
+		tosSet:            tosSet,
 		id: types.NamespacedName{
 			Name: name,
 		},

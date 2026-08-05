@@ -209,7 +209,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 	}
 
 	cegp, _ := newCEGP(&policy)
-	_, err := ParseCEGP(cegp)
+	_, err := ParseCEGP(hivetest.Logger(t), cegp)
 	require.Error(t, err)
 
 	// catch nil DestinationCIDR field
@@ -224,7 +224,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 
 	cegp, _ = newCEGP(&policy)
 	cegp.Spec.DestinationCIDRs = nil
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.Error(t, err)
 
 	// must specify at least one DestinationCIDR
@@ -238,7 +238,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 	}
 
 	cegp, _ = newCEGP(&policy)
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.Error(t, err)
 
 	// catch nil EgressGateway field
@@ -254,7 +254,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 
 	cegp, _ = newCEGP(&policy)
 	cegp.Spec.EgressGateway = nil
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.Error(t, err)
 
 	// Catch EgressGateways that don't contain EgressGateway or EgressGateways fields.
@@ -274,7 +274,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 	cegp, _ = newCEGP(&policy)
 	cegp.Spec.EgressGateways = nil
 	cegp.Spec.EgressGateway = nil
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.Error(t, err)
 
 	// must specify some sort of endpoint selector
@@ -291,7 +291,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 	cegp, _ = newCEGP(&policy)
 	cegp.Spec.Selectors[0].NamespaceSelector = nil
 	cegp.Spec.Selectors[0].PodSelector = nil
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.Error(t, err)
 
 	// PodSelector is not mutated by the CEGP parser
@@ -307,7 +307,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 	}
 
 	cegp, _ = newCEGP(&policy)
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.NoError(t, err)
 	require.Equal(t, ep1Labels, cegp.Spec.Selectors[0].PodSelector.MatchLabels)
 
@@ -324,7 +324,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 	}
 
 	cegp, _ = newCEGP(&policy)
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.NoError(t, err)
 	require.Equal(t, ns1Labels, cegp.Spec.Selectors[0].NamespaceSelector.MatchLabels)
 
@@ -345,7 +345,7 @@ func TestPrivilegedEgressGatewayCEGPParser(t *testing.T) {
 	}
 
 	cegp, _ = newCEGP(&policy)
-	_, err = ParseCEGP(cegp)
+	_, err = ParseCEGP(hivetest.Logger(t), cegp)
 	require.Error(t, err)
 }
 
@@ -1223,7 +1223,7 @@ func tryAssertEgressRules4(policyMap *egressmap.PolicyMap4, rules []egressRule) 
 	}
 
 	for _, r := range parsedRules {
-		policyVal, err := policyMap.Lookup(r.sourceIP, r.destCIDR)
+		policyVal, err := policyMap.Lookup(r.sourceIP, r.destCIDR, 0, false)
 		if err != nil {
 			return fmt.Errorf("cannot lookup policy entry: %w", err)
 		}

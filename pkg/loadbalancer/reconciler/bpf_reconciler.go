@@ -959,6 +959,9 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 	svcVal.SetFlags(flag.UInt16())
 	svcVal.SetRevNat(int(feID))
 	svcVal.SetSipInspect(svc.GetSipInspect())
+	if tos, ok := svc.GetTOS(); ok {
+		svcVal.SetTOS(tos)
+	}
 
 	// Gather backends for the service
 	orderedBackends := ops.sortedBackends(fe)

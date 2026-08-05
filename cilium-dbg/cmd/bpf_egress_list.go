@@ -30,6 +30,7 @@ type egressPolicy struct {
 	GatewayIP  string
 	SipInspect bool
 	SipPort    uint16
+	Tos        string
 }
 
 var bpfEgressListCmd = &cobra.Command{
@@ -47,14 +48,18 @@ var bpfEgressListCmd = &cobra.Command{
 		if err == nil {
 			ipv4MapExists = true
 			parse4 := func(key *egressmap.EgressPolicyKey4, val *egressmap.EgressPolicyVal4) {
-				bpfEgressList = append(bpfEgressList, egressPolicy{
+				policy := egressPolicy{
 					SourceIP:   key.GetSourceIP().String(),
 					DestCIDR:   key.GetDestCIDR().String(),
 					EgressIP:   val.GetEgressAddr().String(),
 					GatewayIP:  mapGatewayIP(val.GetGatewayAddr()),
 					SipInspect: val.SipInspect == 1,
 					SipPort:    val.SipPort,
-				})
+				}
+				if key.HasTOS() {
+					policy.Tos = fmt.Sprintf("0x%02x", key.GetTOS())
+				}
+				bpfEgressList = append(bpfEgressList, policy)
 			}
 
 			if err := policyMap4.IterateWithCallback(parse4); err != nil {
@@ -120,9 +125,9 @@ func mapGatewayIP(ip netip.Addr) string {
 func printEgressList(egressList []egressPolicy) {
 	w := tabwriter.NewWriter(os.Stdout, 5, 0, 3, ' ', 0)
 
-	fmt.Fprintln(w, "Source IP\tDestination CIDR\tEgress IP\tGateway IP\tSIP Inspection\tSIP Port")
+	fmt.Fprintln(w, "Source IP\tDestination CIDR\tEgress IP\tGateway IP\tSIP Inspection\tSIP Port\tTOS")
 	for _, ep := range egressList {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%t\t%d\n", ep.SourceIP, ep.DestCIDR, ep.EgressIP, ep.GatewayIP, ep.SipInspect, ep.SipPort)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%t\t%d\t%s\n", ep.SourceIP, ep.DestCIDR, ep.EgressIP, ep.GatewayIP, ep.SipInspect, ep.SipPort, ep.Tos)
 	}
 
 	w.Flush()

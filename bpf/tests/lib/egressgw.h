@@ -51,6 +51,7 @@ struct egressgw_test_ctx {
 	bool tuple_collision;
 	__u64 packets;
 	__u32 status_code;
+	__u8 tos;
 };
 
 static __always_inline __be16 client_port(__u16 t)
@@ -96,6 +97,8 @@ static __always_inline int egressgw_pktgen(struct __ctx_buff *ctx,
 		l3->saddr = CLIENT_IP;
 		l3->daddr = EXTERNAL_SVC_IP;
 	}
+
+	l3->tos = test_ctx.tos;
 
 	/* Push TCP header */
 	l4 = pktgen__push_default_tcphdr(&builder);

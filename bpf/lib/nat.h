@@ -746,8 +746,9 @@ snat_v4_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 	 * always want to SNAT a packet if it's matched by an egress NAT policy.
 	 */
 #if defined(ENABLE_EGRESS_GATEWAY_COMMON)
-	if (egress_gw_snat_needed_hook(tuple->saddr, tuple->daddr, &target->addr,
-				       &target->ifindex, &target->sip_needed, &target->sip_port)) {
+	if (egress_gw_snat_needed_hook(tuple->saddr, tuple->daddr, ip4->tos,
+				       &target->addr, &target->ifindex,
+				       &target->sip_needed, &target->sip_port)) {
 		if (target->addr == EGRESS_GATEWAY_NO_EGRESS_IP)
 			return DROP_NO_EGRESS_IP;
 

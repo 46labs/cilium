@@ -92,6 +92,12 @@ func dumpSVC(serviceList map[string][]string) {
 		revNATID := svcVal.GetRevNat()
 		backendID := svcVal.GetBackendID()
 		flags := loadbalancer.ServiceFlags(svcVal.GetFlags())
+		tosStr := ""
+		if !svcKey.IsIPv6() {
+			if tos := svcVal.GetTOS(); tos != 0 {
+				tosStr = fmt.Sprintf(" [tos 0x%x]", tos)
+			}
+		}
 
 		if backendSlot == 0 {
 			ip := "0.0.0.0"
@@ -102,7 +108,7 @@ func dumpSVC(serviceList map[string][]string) {
 			if flags.IsL7LB() {
 				extra = fmt.Sprintf("(L7LB Proxy Port: %d)", byteorder.NetworkToHost16(uint16(svcVal.GetBackendID())))
 			}
-			entry = fmt.Sprintf("%s:%d (%d) (%d) [%s] %s", ip, 0, revNATID, backendSlot, flags, extra)
+			entry = fmt.Sprintf("%s:%d (%d) (%d) [%s] %s%s", ip, 0, revNATID, backendSlot, flags, extra, tosStr)
 		} else if backend, found := backendMap[backendID]; !found {
 			entry = fmt.Sprintf("backend %d not found", backendID)
 		} else {
@@ -110,8 +116,8 @@ func dumpSVC(serviceList map[string][]string) {
 			if svcKey.IsIPv6() {
 				fmtStr = "[%s]:%d/%s (%d) (%d)"
 			}
-			entry = fmt.Sprintf(fmtStr, backend.GetAddress(),
-				backend.GetPort(), u8proto.U8proto(backend.GetProtocol()).String(), revNATID, backendSlot)
+			entry = fmt.Sprintf(fmtStr+ "%s", backend.GetAddress(),
+				backend.GetPort(), u8proto.U8proto(backend.GetProtocol()).String(), revNATID, backendSlot, tosStr)
 		}
 
 		serviceList[svc] = append(serviceList[svc], entry)

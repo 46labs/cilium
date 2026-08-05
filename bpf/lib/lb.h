@@ -106,7 +106,8 @@ struct lb4_service {
 	 */
 	__u16 qcount;
 	__u8 sip_inspect;
-	__u8 pad[3];
+	__u8 tos;
+	__u8 pad[2];
 };
 
 struct lb4_backend {
@@ -1691,6 +1692,46 @@ lb4_fill_key(struct lb4_key *key, const struct ipv4_ct_tuple *tuple)
 	key->address = tuple->daddr;
 	/* CT tuple has ports in reverse order: */
 	key->dport = tuple->sport;
+}
+
+/** Set the TOS byte of the IPv4 header to the value configured for the
+ * matched service.
+ *
+ * If the service has no TOS configured (svc->tos == 0), the packet's TOS
+ * is left untouched so that applications can freely set their own TOS.
+ *
+ * @arg ctx		Packet
+ * @arg svc		Matched service entry
+ * @arg ip4		Pointer to L3 header
+ * @arg l3_off		Offset to L3 header
+ *
+ * Returns CTX_ACT_OK on success, DROP_* otherwise.
+ */
+static __always_inline int
+lb4_set_tos(struct __ctx_buff *ctx, const struct lb4_service *svc,
+	    struct iphdr *ip4, int l3_off)
+{
+	__u8 new_tos = svc->tos;
+	__u8 old_tos = ip4->tos;
+	/* TOS is the low byte of its header word; diff the whole word, since
+	 * csum_diff() treats a single byte as a high byte.
+	 */
+	__u8 ver_ihl = *(__u8 *)ip4;
+	__be16 old_word = (__be16)((old_tos << 8) | ver_ihl);
+	__be16 new_word = (__be16)((new_tos << 8) | ver_ihl);
+
+	if (!new_tos || old_tos == new_tos)
+		return CTX_ACT_OK;
+
+	if (ctx_store_bytes(ctx, l3_off + offsetof(struct iphdr, tos),
+			   &new_tos, 1, 0) < 0)
+		return DROP_WRITE_ERROR;
+
+	if (ipv4_csum_update_by_diff(ctx, l3_off,
+				     csum_diff(&old_word, 2, &new_word, 2, 0)) < 0)
+		return DROP_CSUM_L3;
+
+	return CTX_ACT_OK;
 }
 
 /** Extract IPv4 CT tuple from packet
