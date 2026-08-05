@@ -35,34 +35,34 @@ func TestPrivilegedPolicyMap(t *testing.T) {
 		egressIP1 := netip.MustParseAddr("3.3.3.1")
 		egressIP2 := netip.MustParseAddr("3.3.3.2")
 
-		err := egressPolicyMap.Update(sourceIP1, destCIDR1, egressIP1, egressIP1, 0, false)
+		err := egressPolicyMap.Update(sourceIP1, destCIDR1, 0, false, egressIP1, egressIP1, 0, false)
 		assert.NoError(t, err)
 
-		err = egressPolicyMap.Update(sourceIP2, destCIDR2, egressIP2, egressIP2, 0, false)
+		err = egressPolicyMap.Update(sourceIP2, destCIDR2, 0, false, egressIP2, egressIP2, 0, false)
 		assert.NoError(t, err)
 
-		val, err := egressPolicyMap.Lookup(sourceIP1, destCIDR1)
+		val, err := egressPolicyMap.Lookup(sourceIP1, destCIDR1, 0, false)
 		assert.NoError(t, err)
 
 		assert.Equal(t, val.EgressIP.Addr(), egressIP1)
 		assert.Equal(t, val.GatewayIP.Addr(), egressIP1)
 
-		val, err = egressPolicyMap.Lookup(sourceIP2, destCIDR2)
+		val, err = egressPolicyMap.Lookup(sourceIP2, destCIDR2, 0, false)
 		assert.NoError(t, err)
 
 		assert.Equal(t, val.EgressIP.Addr(), egressIP2)
 		assert.Equal(t, val.GatewayIP.Addr(), egressIP2)
 
-		err = egressPolicyMap.Delete(sourceIP2, destCIDR2)
+		err = egressPolicyMap.Delete(sourceIP2, destCIDR2, 0, false)
 		assert.NoError(t, err)
 
-		val, err = egressPolicyMap.Lookup(sourceIP1, destCIDR1)
+		val, err = egressPolicyMap.Lookup(sourceIP1, destCIDR1, 0, false)
 		assert.NoError(t, err)
 
 		assert.Equal(t, val.EgressIP.Addr(), egressIP1)
 		assert.Equal(t, val.GatewayIP.Addr(), egressIP1)
 
-		_, err = egressPolicyMap.Lookup(sourceIP2, destCIDR2)
+		_, err = egressPolicyMap.Lookup(sourceIP2, destCIDR2, 0, false)
 		assert.ErrorIs(t, err, ebpf.ErrKeyNotExist)
 	})
 
@@ -115,6 +115,54 @@ func TestPrivilegedPolicyMap(t *testing.T) {
 		assert.Equal(t, val.EgressIfindex, ifIndex1)
 
 		_, err = egressPolicyMap.Lookup(sourceIP2, destCIDR2)
+		assert.ErrorIs(t, err, ebpf.ErrKeyNotExist)
+	})
+
+	t.Run("IPv4 policies with pinned TOS", func(t *testing.T) {
+		egressPolicyMap := createPolicyMap4(hivetest.Lifecycle(t), nil, DefaultPolicyConfig, ebpf.PinNone)
+
+		sourceIP := netip.MustParseAddr("1.1.1.1")
+		destCIDR := netip.MustParsePrefix("2.2.1.5/32")
+		egressIP := netip.MustParseAddr("3.3.3.1")
+		const tos = 0xb8
+
+		// Fallback entry with a pinned TOS of 0 plus the TOS-pinned entry.
+		err := egressPolicyMap.Update(sourceIP, destCIDR, 0, true, egressIP, egressIP, 0, false)
+		assert.NoError(t, err)
+
+		err = egressPolicyMap.Update(sourceIP, destCIDR, tos, true, egressIP, egressIP, 0, false)
+		assert.NoError(t, err)
+
+		val, err := egressPolicyMap.Lookup(sourceIP, destCIDR, tos, true)
+		assert.NoError(t, err)
+		assert.Equal(t, val.EgressIP.Addr(), egressIP)
+
+		val, err = egressPolicyMap.Lookup(sourceIP, destCIDR, 0, true)
+		assert.NoError(t, err)
+		assert.Equal(t, val.EgressIP.Addr(), egressIP)
+
+		// A lookup with a non-matching TOS falls back to the entry with a
+		// pinned TOS of 0, mirroring the datapath's two-lookup semantics.
+		val, err = egressPolicyMap.Lookup(sourceIP, destCIDR, tos+1, true)
+		assert.NoError(t, err)
+		assert.Equal(t, val.EgressIP.Addr(), egressIP)
+
+		err = egressPolicyMap.Delete(sourceIP, destCIDR, tos, true)
+		assert.NoError(t, err)
+
+		// The pinned entry is gone; the lookup with the pinned TOS now falls
+		// back to the entry with a pinned TOS of 0.
+		val, err = egressPolicyMap.Lookup(sourceIP, destCIDR, tos, true)
+		assert.NoError(t, err)
+		assert.Equal(t, val.EgressIP.Addr(), egressIP)
+
+		err = egressPolicyMap.Delete(sourceIP, destCIDR, 0, true)
+		assert.NoError(t, err)
+
+		_, err = egressPolicyMap.Lookup(sourceIP, destCIDR, tos, true)
+		assert.ErrorIs(t, err, ebpf.ErrKeyNotExist)
+
+		_, err = egressPolicyMap.Lookup(sourceIP, destCIDR, 0, true)
 		assert.ErrorIs(t, err, ebpf.ErrKeyNotExist)
 	})
 }

@@ -28,15 +28,24 @@ const (
 	// prefix part of an egress policy key (i.e. the source IP).
 	PolicyStaticPrefixBits4 = uint32(unsafe.Sizeof(types.IPv4{}) * 8)
 	PolicyStaticPrefixBits6 = uint32(unsafe.Sizeof(types.IPv6{}) * 8)
+	// TosPrefixBits4 is the size of the TOS byte in an egress policy key. It
+	// always counts towards the prefix so entries with different pinned TOS
+	// values stay distinct LPM nodes even for short destination prefixes.
+	TosPrefixBits4 = uint32(unsafe.Sizeof(uint8(0)) * 8)
 )
 
 // EgressPolicyKey4 is the key of an egress policy map.
 type EgressPolicyKey4 struct {
-	// PrefixLen is full 32 bits of SourceIP + DestCIDR's mask bits
+	// PrefixLen is SourceIP + TOS + DestCIDR mask bits
 	PrefixLen uint32 `align:"lpm_key"`
 
 	SourceIP types.IPv4 `align:"saddr"`
+	Tos      uint8      `align:"tos"`
 	DestCIDR types.IPv4 `align:"daddr"`
+	// HasTos indicates the key pins the TOS byte. It is stored beyond the
+	// matched prefix, so it does not take part in the LPM matching.
+	HasTos uint8    `align:"has_tos"`
+	Pad    [2]uint8 `align:"pad"`
 }
 
 // EgressPolicyVal4 is the value of an egress policy map.
@@ -215,14 +224,18 @@ func OpenPinnedPolicyMap6(logger *slog.Logger) (*PolicyMap6, error) {
 }
 
 // NewEgressPolicyKey4 returns a new EgressPolicyKey4 object representing the
-// (source IP, destination CIDR) tuple.
-func NewEgressPolicyKey4(sourceIP netip.Addr, destPrefix netip.Prefix) EgressPolicyKey4 {
+// (source IP, destination CIDR) tuple, optionally pinning the TOS byte.
+func NewEgressPolicyKey4(sourceIP netip.Addr, destPrefix netip.Prefix, tos uint8, tosSet bool) EgressPolicyKey4 {
 	key := EgressPolicyKey4{}
 
 	ones := destPrefix.Bits()
 	key.SourceIP.FromAddr(sourceIP)
+	key.Tos = tos
 	key.DestCIDR.FromAddr(destPrefix.Addr())
-	key.PrefixLen = PolicyStaticPrefixBits4 + uint32(ones)
+	key.PrefixLen = PolicyStaticPrefixBits4 + TosPrefixBits4 + uint32(ones)
+	if tosSet {
+		key.HasTos = 1
+	}
 
 	return key
 }
@@ -244,7 +257,12 @@ func NewEgressPolicyVal4(egressIP, gatewayIP netip.Addr, sipPort uint16, sipInsp
 
 // String returns the string representation of an egress policy key.
 func (k *EgressPolicyKey4) String() string {
-	return fmt.Sprintf("%s %s/%d", k.SourceIP, k.DestCIDR, k.PrefixLen-PolicyStaticPrefixBits4)
+	destBits := int(k.PrefixLen - PolicyStaticPrefixBits4 - TosPrefixBits4)
+	if k.HasTOS() {
+		return fmt.Sprintf("%s %s/%d tos %#x", k.SourceIP, k.DestCIDR, destBits, k.Tos)
+	}
+
+	return fmt.Sprintf("%s %s/%d", k.SourceIP, k.DestCIDR, destBits)
 }
 
 // New returns an egress policy key
@@ -254,7 +272,8 @@ func (k *EgressPolicyKey4) New() bpf.MapKey { return &EgressPolicyKey4{} }
 // policy key.
 func (k *EgressPolicyKey4) Match(sourceIP netip.Addr, destCIDR netip.Prefix) bool {
 	return k.GetSourceIP() == sourceIP &&
-		k.GetDestCIDR() == destCIDR
+		k.GetDestCIDR() == destCIDR &&
+		!k.HasTOS()
 }
 
 // GetSourceIP returns the egress policy key's source IP.
@@ -263,10 +282,22 @@ func (k *EgressPolicyKey4) GetSourceIP() netip.Addr {
 	return addr
 }
 
+// HasTOS returns true if the egress policy key pins the TOS byte.
+func (k *EgressPolicyKey4) HasTOS() bool {
+	return k.HasTos == 1
+}
+
+// GetTOS returns the TOS byte pinned by the egress policy key.
+func (k *EgressPolicyKey4) GetTOS() uint8 {
+	return k.Tos
+}
+
 // GetDestCIDR returns the egress policy key's destination CIDR.
 func (k *EgressPolicyKey4) GetDestCIDR() netip.Prefix {
 	addr, _ := netipx.FromStdIP(k.DestCIDR.IP())
-	return netip.PrefixFrom(addr, int(k.PrefixLen-PolicyStaticPrefixBits4))
+	bits := k.PrefixLen - PolicyStaticPrefixBits4 - TosPrefixBits4
+
+	return netip.PrefixFrom(addr, int(bits))
 }
 
 // New returns an egress policy value
@@ -295,29 +326,36 @@ func (v *EgressPolicyVal4) String() string {
 }
 
 // Lookup returns the egress policy object associated with the provided (source
-// IP, destination CIDR) tuple.
-func (m *PolicyMap4) Lookup(sourceIP netip.Addr, destCIDR netip.Prefix) (*EgressPolicyVal4, error) {
-	key := NewEgressPolicyKey4(sourceIP, destCIDR)
+// IP, destination CIDR) tuple, optionally pinning the TOS byte. If the lookup
+// with a pinned TOS misses, it falls back to the entry with a pinned TOS of 0,
+// mirroring the datapath's lookup semantics.
+func (m *PolicyMap4) Lookup(sourceIP netip.Addr, destCIDR netip.Prefix, tos uint8, tosSet bool) (*EgressPolicyVal4, error) {
+	key := NewEgressPolicyKey4(sourceIP, destCIDR, tos, tosSet)
 	val, err := m.m.Lookup(&key)
+	if err != nil && tos != 0 {
+		key := NewEgressPolicyKey4(sourceIP, destCIDR, 0, tosSet)
+		val, err = m.m.Lookup(&key)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	return val.(*EgressPolicyVal4), err
+	return val.(*EgressPolicyVal4), nil
 }
 
 // Update updates the (sourceIP, destCIDR) egress policy entry with the provided
-// egress and gateway IPs.
-func (m *PolicyMap4) Update(sourceIP netip.Addr, destCIDR netip.Prefix, egressIP, gatewayIP netip.Addr, sipPort uint16, sipInspect bool) error {
-	key := NewEgressPolicyKey4(sourceIP, destCIDR)
+// egress and gateway IPs, optionally pinning the TOS byte.
+func (m *PolicyMap4) Update(sourceIP netip.Addr, destCIDR netip.Prefix, tos uint8, tosSet bool, egressIP, gatewayIP netip.Addr, sipPort uint16, sipInspect bool) error {
+	key := NewEgressPolicyKey4(sourceIP, destCIDR, tos, tosSet)
 	val := NewEgressPolicyVal4(egressIP, gatewayIP, sipPort, sipInspect)
 
 	return m.m.Update(&key, &val)
 }
 
-// Delete deletes the (sourceIP, destCIDR) egress policy entry.
-func (m *PolicyMap4) Delete(sourceIP netip.Addr, destCIDR netip.Prefix) error {
-	key := NewEgressPolicyKey4(sourceIP, destCIDR)
+// Delete deletes the (sourceIP, destCIDR) egress policy entry, optionally
+// pinning the TOS byte.
+func (m *PolicyMap4) Delete(sourceIP netip.Addr, destCIDR netip.Prefix, tos uint8, tosSet bool) error {
+	key := NewEgressPolicyKey4(sourceIP, destCIDR, tos, tosSet)
 
 	return m.m.Delete(&key)
 }

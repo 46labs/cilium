@@ -425,8 +425,9 @@ skip_vtep:
 		__be32 snat_addr, daddr;
 
 		daddr = ip4->daddr;
-		if (egress_gw_snat_needed_hook(ip4->saddr, daddr, &snat_addr,
-					       &egress_ifindex, &sip_needed, &sip_port)) {
+		if (egress_gw_snat_needed_hook(ip4->saddr, daddr, ip4->tos,
+					       &snat_addr, &egress_ifindex,
+					       &sip_needed, &sip_port)) {
 			if (snat_addr == EGRESS_GATEWAY_NO_EGRESS_IP)
 				return DROP_NO_EGRESS_IP;
 

@@ -145,6 +145,11 @@ const (
 	// ServiceSipInspect indicates that sip-inspect should take place.
 	ServiceSipInspect = ServicePrefix + "/sip-inspect"
 
+	// ServiceTOS indicates the TOS byte value that should be set on packets
+	// load-balanced to this service. Absence of the annotation leaves the
+	// packet's TOS untouched.
+	ServiceTOS = ServicePrefix + "/tos"
+
 	// ServicePinningNode indicates that service pinning to specified node should take place.
 	ServicePinningNode = ServicePrefix + "/svc-pinning-node"
 

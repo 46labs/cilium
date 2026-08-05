@@ -866,6 +866,9 @@ const (
 	// UDP port which is used for egress SIP SNAT
 	SipPort = "sipPort"
 
+	// TOS byte pinned by a service or egress gateway policy
+	Tos = "tos"
+
 	// Service pinning (to node)
 	SvcPinning = "svcPinning"
 

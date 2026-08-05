@@ -8,8 +8,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/cilium/hive/hivetest"
+	"github.com/cilium/cilium/pkg/annotation"
+	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	slimv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/policy/api"
@@ -209,6 +213,82 @@ func TestPolicyConfig_updateMatchedEndpointIDs(t *testing.T) {
 			if tt.want > 0 {
 				assert.Contains(t, config.matchedEndpoints, endpointID(tt.wantEndpointID))
 			}
+		})
+	}
+}
+
+func TestParseCEGPTOS(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantTos     uint8
+		wantTosSet  bool
+	}{
+		{
+			name:       "no annotation",
+			wantTos:    0,
+			wantTosSet: false,
+		},
+		{
+			name:        "decimal TOS",
+			annotations: map[string]string{annotation.ServiceTOS: "184"},
+			wantTos:     0xb8,
+			wantTosSet:  true,
+		},
+		{
+			name:        "hex TOS",
+			annotations: map[string]string{annotation.ServiceTOS: "0xb8"},
+			wantTos:     0xb8,
+			wantTosSet:  true,
+		},
+		{
+			name:        "zero TOS is pinned",
+			annotations: map[string]string{annotation.ServiceTOS: "0"},
+			wantTos:     0,
+			wantTosSet:  true,
+		},
+		{
+			name:        "invalid TOS is ignored",
+			annotations: map[string]string{annotation.ServiceTOS: "banana"},
+			wantTos:     0,
+			wantTosSet:  false,
+		},
+		{
+			name:        "TOS out of range is ignored",
+			annotations: map[string]string{annotation.ServiceTOS: "256"},
+			wantTos:     0,
+			wantTosSet:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cegp := &v2.CiliumEgressGatewayPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "cegp-tos",
+					Annotations: tt.annotations,
+				},
+				Spec: v2.CiliumEgressGatewayPolicySpec{
+					Selectors: []v2.EgressRule{
+						{
+							PodSelector: &slimv1.LabelSelector{
+								MatchLabels: map[string]string{"app": "test"},
+							},
+						},
+					},
+					DestinationCIDRs: []v2.CIDR{"0.0.0.0/0"},
+					EgressGateway: &v2.EgressGateway{
+						NodeSelector: &slimv1.LabelSelector{
+							MatchLabels: map[string]string{"node": "gw"},
+						},
+					},
+				},
+			}
+
+			config, err := ParseCEGP(hivetest.Logger(t), cegp)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantTos, config.tos)
+			assert.Equal(t, tt.wantTosSet, config.tosSet)
 		})
 	}
 }
