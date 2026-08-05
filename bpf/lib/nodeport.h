@@ -2985,6 +2985,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	bool is_svc_proto = true;
 	const struct lb4_service *svc;
 	struct lb4_key key = {};
+	void *data, *data_end;
 	int ret, l4_off;
 
 	fraginfo = ipfrag_encode_ipv4(ip4);
@@ -3009,6 +3010,16 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	svc = lb4_lookup_service(&key, false);
 
 	if (svc) {
+		ret = lb4_set_tos(ctx, svc, ip4, l3_off);
+		if (IS_ERR(ret))
+			return ret;
+
+		/* lb4_set_tos() writes to the packet, so the packet pointers
+		 * must be revalidated before the next access.
+		 */
+		if (!revalidate_data(ctx, &data, &data_end, &ip4))
+			return DROP_INVALID;
+
 		if (svc->sip_inspect) {
 #ifdef ENABLE_MASQUERADE_IPV4
 			if (tuple.sip_call_id_hash) {

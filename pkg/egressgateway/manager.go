@@ -411,7 +411,7 @@ func (manager *Manager) handlePolicyEvent(event resource.Event[*Policy]) {
 // with the config fields.
 func (manager *Manager) onAddEgressPolicy(policy *Policy) error {
 
-	config, err := ParseCEGP(policy)
+	config, err := ParseCEGP(manager.logger, policy)
 	if err != nil {
 		manager.logger.Warn(
 			"Failed to parse CiliumEgressGatewayPolicy",
@@ -667,42 +667,58 @@ func (manager *Manager) updateEgressRules4() {
 			return
 		}
 
-		policyKey := egressmap.NewEgressPolicyKey4(endpointIP, dstCIDR)
-		// This key needs to be present in the BPF map, hence remove it from
-		// the list of stale ones.
-		stale.Delete(policyKey)
-
-		policyVal, policyPresent := egressPolicies[policyKey]
-
 		gatewayIP := gwc.gatewayIP
 		if excludedCIDR {
 			gatewayIP = ExcludedCIDRIPv4
 		}
 
-		if policyPresent && policyVal.Match(gwc.egressIP4, gatewayIP) {
-			return
+		addRule := func(tos uint8, tosSet bool) {
+			policyKey := egressmap.NewEgressPolicyKey4(endpointIP, dstCIDR, tos, tosSet)
+			// This key needs to be present in the BPF map, hence remove it from
+			// the list of stale ones.
+			stale.Delete(policyKey)
+
+			policyVal, policyPresent := egressPolicies[policyKey]
+
+			if policyPresent && policyVal.Match(gwc.egressIP4, gatewayIP) {
+				return
+			}
+
+			if err := manager.policyMap4.Update(endpointIP, dstCIDR, tos, tosSet, gwc.egressIP4, gatewayIP, gwc.sipPort, gwc.sipInspect); err != nil {
+				manager.logger.Error(
+					"Error applying IPv4 egress gateway policy",
+					logfields.Error, err,
+					logfields.SourceIP, endpointIP,
+					logfields.DestinationCIDR, dstCIDR,
+					logfields.EgressIP, gwc.egressIP4,
+					logfields.GatewayIP, gatewayIP,
+					logfields.SipPort, gwc.sipPort,
+					logfields.SipInspect, gwc.sipInspect,
+					logfields.Tos, tos,
+				)
+			} else {
+				manager.logger.Debug("IPv4 egress gateway policy applied",
+					logfields.SourceIP, endpointIP,
+					logfields.DestinationCIDR, dstCIDR,
+					logfields.EgressIP, gwc.egressIP4,
+					logfields.GatewayIP, gatewayIP,
+					logfields.SipPort, gwc.sipPort,
+					logfields.SipInspect, gwc.sipInspect,
+					logfields.Tos, tos,
+				)
+			}
 		}
 
-		if err := manager.policyMap4.Update(endpointIP, dstCIDR, gwc.egressIP4, gatewayIP, gwc.sipPort, gwc.sipInspect); err != nil {
-			manager.logger.Error(
-				"Error applying IPv4 egress gateway policy",
-				logfields.Error, err,
-				logfields.SourceIP, endpointIP,
-				logfields.DestinationCIDR, dstCIDR,
-				logfields.EgressIP, gwc.egressIP4,
-				logfields.GatewayIP, gatewayIP,
-				logfields.SipPort, gwc.sipPort,
-				logfields.SipInspect, gwc.sipInspect,
-			)
+		// A non-zero TOS pin additionally gets a TOS-0 fallback entry: it is
+		// needed for the reply path (replies usually carry a different TOS than
+		// the request) and for requests whose TOS does not match the pin.
+		if gwc.tosSet {
+			addRule(gwc.tos, true)
+			if gwc.tos != 0 {
+				addRule(0, true)
+			}
 		} else {
-			manager.logger.Debug("IPv4 egress gateway policy applied",
-				logfields.SourceIP, endpointIP,
-				logfields.DestinationCIDR, dstCIDR,
-				logfields.EgressIP, gwc.egressIP4,
-				logfields.GatewayIP, gatewayIP,
-				logfields.SipPort, gwc.sipPort,
-				logfields.SipInspect, gwc.sipInspect,
-			)
+			addRule(0, false)
 		}
 	}
 
@@ -712,18 +728,20 @@ func (manager *Manager) updateEgressRules4() {
 
 	// Remove all the entries marked as stale.
 	for policyKey := range stale {
-		if err := manager.policyMap4.Delete(policyKey.GetSourceIP(), policyKey.GetDestCIDR()); err != nil {
+		if err := manager.policyMap4.Delete(policyKey.GetSourceIP(), policyKey.GetDestCIDR(), policyKey.GetTOS(), policyKey.HasTOS()); err != nil {
 			manager.logger.Error(
 				"Error removing IPv4 egress gateway policy",
 				logfields.Error, err,
 				logfields.SourceIP, policyKey.GetSourceIP(),
 				logfields.DestinationCIDR, policyKey.GetDestCIDR(),
+				logfields.Tos, policyKey.GetTOS(),
 			)
 		} else {
 			manager.logger.Debug(
 				"IPv4 egress gateway policy removed",
 				logfields.SourceIP, policyKey.GetSourceIP(),
 				logfields.DestinationCIDR, policyKey.GetDestCIDR(),
+				logfields.Tos, policyKey.GetTOS(),
 			)
 		}
 	}

@@ -245,6 +245,25 @@ func (svc *Service) GetSipInspect() bool {
 	return ret
 }
 
+// GetTOS returns the TOS byte value configured for the service via the
+// service.cilium.io/tos annotation. The value may be specified either in
+// decimal or hexadecimal (e.g. "0xb8") notation. If the annotation is
+// absent or invalid, the second return value is false and the TOS of
+// packets hitting the service is left untouched.
+func (svc *Service) GetTOS() (uint8, bool) {
+	value, ok := svc.Annotations[annotation.ServiceTOS]
+	if !ok {
+		return 0, false
+	}
+
+	tos, err := strconv.ParseUint(value, 0, 8)
+	if err != nil {
+		return 0, false
+	}
+
+	return uint8(tos), true
+}
+
 func (svc *Service) GetProxyDelegation() SVCProxyDelegation {
 	if value, ok := annotation.Get(svc, annotation.ServiceProxyDelegation); ok {
 		tmp := SVCProxyDelegation(strings.ToLower(value))

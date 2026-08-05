@@ -221,6 +221,10 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
 	if (svc) {
 		const struct lb4_backend *backend;
 
+		ret = lb4_set_tos(ctx, svc, ip4, ETH_HLEN);
+		if (IS_ERR(ret))
+			return ret;
+
 #if defined(ENABLE_L7_LB)
 		if (lb4_svc_is_l7_loadbalancer(svc)) {
 			proxy_port = (__u16)svc->l7_lb_proxy_port;

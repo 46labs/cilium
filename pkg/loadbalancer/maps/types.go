@@ -138,6 +138,12 @@ type ServiceValue interface {
 
 	// Get SIP inspection for Service
 	GetSipInspect() bool
+
+	// Set TOS byte for Service
+	SetTOS(uint8)
+
+	// Get TOS byte for Service
+	GetTOS() uint8
 }
 
 type pad2uint8 [2]uint8
@@ -218,14 +224,15 @@ type Service4Value struct {
 	Flags2     uint8    `align:"flags2"`
 	QCount     uint16   `align:"qcount"`
 	SipInspect uint8    `align:"sip_inspect"`
-	Pad        [3]uint8 `align:"pad"`
+	Tos        uint8    `align:"tos"`
+	Pad        [2]uint8 `align:"pad"`
 }
 
 func (s *Service4Value) New() bpf.MapValue { return &Service4Value{} }
 
 func (s *Service4Value) String() string {
 	sHost := s.ToHost().(*Service4Value)
-	return fmt.Sprintf("%d %d[%d] (%d) [0x%x 0x%x] [sip-inspect %d]", sHost.BackendID, sHost.Count, sHost.QCount, sHost.RevNat, sHost.Flags, sHost.Flags2, sHost.SipInspect)
+	return fmt.Sprintf("%d %d[%d] (%d) [0x%x 0x%x] [sip-inspect %d] [tos 0x%x]", sHost.BackendID, sHost.Count, sHost.QCount, sHost.RevNat, sHost.Flags, sHost.Flags2, sHost.SipInspect, sHost.Tos)
 }
 
 func (s *Service4Value) SetCount(count int)   { s.Count = uint16(count) }
@@ -243,6 +250,8 @@ func (s *Service4Value) SetSipInspect(enabled bool) {
 		s.SipInspect = 0
 	}
 }
+func (s *Service4Value) GetTOS() uint8    { return s.Tos }
+func (s *Service4Value) SetTOS(tos uint8) { s.Tos = tos }
 func (s *Service4Value) SetFlags(flags uint16) {
 	s.Flags = uint8(flags & 0xff)
 	s.Flags2 = uint8(flags >> 8)
@@ -411,6 +420,10 @@ func (s *Service6Value) SetSipInspect(enabled bool) {
 		s.SipInspect = 0
 	}
 }
+// GetTOS and SetTOS are no-ops for IPv6 services, as TOS pinning is
+// currently only supported on the IPv4 datapath.
+func (s *Service6Value) GetTOS() uint8    { return 0 }
+func (s *Service6Value) SetTOS(uint8)     {}
 func (s *Service6Value) SetFlags(flags uint16) {
 	s.Flags = uint8(flags & 0xff)
 	s.Flags2 = uint8(flags >> 8)

@@ -120,7 +120,7 @@ static __always_inline void setup_test(void)
 
 	__lb_v4_add_service(FRONTEND_IP, FRONTEND_PORT, IPPROTO_TCP, IPPROTO_TCP,
 			    2, bpf_htons(REV_NAT_INDEX), SVC_FLAG_ROUTABLE, 0,
-			    true, affinity_timeout, 0);
+			    true, affinity_timeout, 0, 0);
 
 	__lb_v4_add_backend(FRONTEND_IP, FRONTEND_PORT, 1, BACKEND_ID1, BACKEND_IP1,
 			    BACKEND_PORT, IPPROTO_TCP, 0, false);

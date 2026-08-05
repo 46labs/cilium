@@ -6,9 +6,27 @@ static __always_inline void add_egressgw_policy_entry(__be32 saddr, __be32 daddr
 						      __be32 gateway_ip, __be32 egress_ip)
 {
 	struct egress_gw_policy_key in_key = {
-		.lpm_key = { EGRESS_PREFIX_LEN_V4(cidr), {} },
+		.lpm_key = { EGRESS_PREFIX_LEN_V4(cidr) + 8, {} },
 		.saddr   = saddr,
 		.daddr   = daddr,
+	};
+
+	struct egress_gw_policy_entry in_val = {
+		.egress_ip  = egress_ip,
+		.gateway_ip = gateway_ip,
+	};
+
+	map_update_elem(&cilium_egress_gw_policy_v4, &in_key, &in_val, 0);
+}
+
+static __always_inline void add_egressgw_policy_entry_tos(__be32 saddr, __be32 daddr, __u8 tos,
+							  __be32 gateway_ip, __be32 egress_ip)
+{
+	struct egress_gw_policy_key in_key = {
+		.lpm_key = { EGRESS_IPV4_TOS_PREFIX, {} },
+		.saddr   = saddr,
+		.daddr   = daddr,
+		.tos     = tos,
 	};
 
 	struct egress_gw_policy_entry in_val = {
@@ -22,9 +40,21 @@ static __always_inline void add_egressgw_policy_entry(__be32 saddr, __be32 daddr
 static __always_inline void del_egressgw_policy_entry(__be32 saddr, __be32 daddr, __u8 cidr)
 {
 	struct egress_gw_policy_key in_key = {
-		.lpm_key = { EGRESS_PREFIX_LEN_V4(cidr), {} },
+		.lpm_key = { EGRESS_PREFIX_LEN_V4(cidr) + 8, {} },
 		.saddr   = saddr,
 		.daddr   = daddr,
+	};
+
+	map_delete_elem(&cilium_egress_gw_policy_v4, &in_key);
+}
+
+static __always_inline void del_egressgw_policy_entry_tos(__be32 saddr, __be32 daddr, __u8 tos)
+{
+	struct egress_gw_policy_key in_key = {
+		.lpm_key = { EGRESS_IPV4_TOS_PREFIX, {} },
+		.saddr   = saddr,
+		.daddr   = daddr,
+		.tos     = tos,
 	};
 
 	map_delete_elem(&cilium_egress_gw_policy_v4, &in_key);
