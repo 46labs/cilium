@@ -308,6 +308,32 @@ static __always_inline int add_external_request_reply_ct(struct __ctx_buff *ctx)
 			  CT_INGRESS, NULL, NULL);
 }
 
+static __always_inline int add_unhashed_nodeport_reply_ct(struct __ctx_buff *ctx,
+							   __u16 rev_nat_index)
+{
+	struct ipv4_ct_tuple tuple = {};
+	struct ct_state state = {
+		.node_port = true,
+		.rev_nat_index = rev_nat_index,
+	};
+	struct iphdr *ip4;
+	void *data, *data_end;
+	fraginfo_t fraginfo;
+	int l4_off;
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip4))
+		return TEST_ERROR;
+	fraginfo = ipfrag_encode_ipv4(ip4);
+	snat_v4_init_tuple(ip4, NAT_DIR_EGRESS, &tuple);
+	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
+	if (ct_extract_ports4(ctx, ip4, fraginfo, l4_off, CT_EGRESS, &tuple))
+		return TEST_ERROR;
+
+	/* Simulate an older SIP dialog which shares the UDP 5-tuple. */
+	return ct_create4(get_ct_map4(&tuple), NULL, &tuple, ctx,
+			  CT_EGRESS, &state, NULL);
+}
+
 PKTGEN("tc", "sip_egw_3_external_request_reply_redirect")
 int sip_egw_external_request_reply_redirect_pktgen(struct __ctx_buff *ctx)
 {
@@ -399,9 +425,14 @@ int sip_egw_external_request_reply_gateway_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "sip_egw_4_external_request_reply_gateway")
 int sip_egw_external_request_reply_gateway_setup(struct __ctx_buff *ctx)
 {
+	__u16 revnat_id = 1;
+
 	/* On the egress-gateway node LB4 is a remote endpoint. */
 	add_egress_policy_for(LB4_IP, true);
 	endpoint_v4_del_entry(LB4_IP);
+	lb_v4_add_service_sip(VIP_IP, SIP_PORT, IPPROTO_UDP, 0, revnat_id);
+	if (add_unhashed_nodeport_reply_ct(ctx, revnat_id))
+		return TEST_ERROR;
 	set_identity_mark(ctx, LB3_IDENTITY + 1, MARK_MAGIC_EGW_DONE);
 	return netdev_send_packet(ctx);
 }

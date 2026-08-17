@@ -485,6 +485,16 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	fraginfo = ipfrag_encode_ipv4(ip4);
 	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
+	/* UDP 5-tuples are routinely reused by SIP peers. Include the Call-ID
+	 * before looking for a NodePort reply entry, otherwise an unrelated SIP
+	 * dialog can trigger RevDNAT and suppress the EgressGW SNAT mapping which
+	 * pins replies to their original LB backend.
+	 */
+	tuple.sip_call_id_hash = sip_inspect(ctx);
+	/* sip_inspect() may linearize the skb and invalidate packet pointers. */
+	if (!revalidate_data(ctx, &data, &data_end, &ip4))
+		return DROP_INVALID;
+
 	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
