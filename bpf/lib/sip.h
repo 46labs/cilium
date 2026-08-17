@@ -7,6 +7,17 @@
 
 #define NOT_FOUND 0
 
+/* sip_inspect() uses direct packet access. TC skbs received after tunnel
+ * decapsulation may keep the SIP payload outside the linear head, even though
+ * skb_load_bytes() can still read the SIP method. Pull only the parser window
+ * that can actually be inspected: 1000 bytes while looking for Call-ID, the
+ * 9-byte header itself and the 68-byte Call-ID bounds window.
+ */
+#define SIP_L3_HEADERS_LEN (sizeof(struct ethhdr) + sizeof(struct iphdr))
+#define SIP_PAYLOAD_OFFSET (SIP_L3_HEADERS_LEN + sizeof(struct udphdr))
+#define SIP_METHOD_LEN 10
+#define SIP_PARSE_WINDOW (SIP_PAYLOAD_OFFSET + 1000 + 9 + 68)
+
 static inline __u8 is_sip(const char *cur, const char *data_end)
 {
 	static const __u64 resp = 0x20302e322f706973; // "sip/2.0 "
@@ -89,19 +100,20 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 
 	void *data, *data_end;
 	struct ethhdr *eth = NULL;
-	struct udphdr *udp = NULL;
 	struct iphdr *iph = NULL;
 	__u32 hash = 0x811c9dc5;
 	__u32 fnv_prime = 0x01000193;
+	__u64 method[2] = {};
+	__u32 pull_len;
 
 	data = (void *)(long)ctx->data;
 	data_end = (void *)(long)ctx->data_end;
 
-	if (data + 32 >= data_end)
+	if (data + SIP_L3_HEADERS_LEN > data_end)
 		return NOT_FOUND;
 
 	eth = data;
-	if ((void *)(eth + 1) >= data_end)
+	if ((void *)(eth + 1) > data_end)
 		return NOT_FOUND;
 
 	if (eth->h_proto != bpf_htons(ETH_P_IP))
@@ -112,20 +124,41 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 	if (iph->protocol != IPPROTO_UDP)
 		return NOT_FOUND;
 
-	if ((void *)(iph + 1) >= data_end)
+	if ((void *)(iph + 1) > data_end)
 		return NOT_FOUND;
 
-	udp = (void *)(iph + 1);
-
-	if ((void *)(udp + 1) >= data_end)
+	void *cur = data + SIP_PAYLOAD_OFFSET;
+	if (cur + SIP_METHOD_LEN > data_end) {
+		/* skb_load_bytes() can read non-linear data without invalidating
+		 * packet pointers. Only linearize the larger parser window after
+		 * confirming that this is actually SIP.
+		 */
+		if (ctx_load_bytes(ctx, SIP_PAYLOAD_OFFSET, method,
+				   SIP_METHOD_LEN) < 0 ||
+		    !is_sip((char *)method, (char *)method + SIP_METHOD_LEN))
+			return NOT_FOUND;
+	} else if (!is_sip(cur, data_end)) {
 		return NOT_FOUND;
+	}
 
-	void *cur = (void *)(udp + 1);
-	if (cur >= data_end)
-		return NOT_FOUND;
+	/* The scan below uses direct access too. A decapsulated skb may have only
+	 * its headers linear even though the complete SIP message is present.
+	 */
+	pull_len = (__u32)ctx_full_len(ctx);
+	if (pull_len > SIP_PARSE_WINDOW)
+		pull_len = SIP_PARSE_WINDOW;
+	if (data + pull_len > data_end) {
+		if (ctx_pull_data(ctx, pull_len) < 0)
+			return NOT_FOUND;
 
-	if (!is_sip(cur, data_end))
-		return NOT_FOUND;
+		data = (void *)(long)ctx->data;
+		data_end = (void *)(long)ctx->data_end;
+
+		if (data + SIP_PAYLOAD_OFFSET + SIP_METHOD_LEN > data_end)
+			return NOT_FOUND;
+
+		cur = data + SIP_PAYLOAD_OFFSET;
+	}
 
 	int found = 0;
 

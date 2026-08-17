@@ -386,6 +386,9 @@ static __always_inline int nodeport_snat_fwd_ipv4(struct __ctx_buff *ctx,
 
 	if (target.sip_needed) {
 		tuple.sip_call_id_hash = sip_inspect(ctx);
+		/* sip_inspect() may linearize the skb and invalidate packet pointers. */
+		if (!revalidate_data(ctx, &data, &data_end, &ip4))
+			return DROP_INVALID;
 	}
 
 #if defined(ENABLE_EGRESS_GATEWAY_COMMON) && defined(IS_BPF_HOST)
