@@ -6081,6 +6081,9 @@
       },
       "type": "object"
     },
+    "remoteEndpointCTGCBatchingInterval": {
+      "type": "string"
+    },
     "resourceQuotas": {
       "properties": {
         "cilium": {

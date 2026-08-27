@@ -43,4 +43,7 @@ var Cell = cell.Group(
 	cell.Provide(
 		func(ipc *ipcache.IPCache) endpoint.IPCache { return ipc },
 	),
+
+	// Cell triggers CT GC on remote endpoints for CT/NAT maps consistency
+	endpoint.RemoteEndpointGCCell,
 )

@@ -130,6 +130,8 @@ data:
   conntrack-gc-max-interval: {{ include "validateDuration" .Values.conntrackGCMaxInterval | quote }}
 {{- end }}
 
+  cilium-remote-endpoint-ct-gc-batching-interval: {{ include "validateDuration" .Values.remoteEndpointCTGCBatchingInterval | quote }}
+
 {{- if hasKey .Values "disableEnvoyVersionCheck" }}
   disable-envoy-version-check: {{ .Values.disableEnvoyVersionCheck | quote }}
 {{- end }}

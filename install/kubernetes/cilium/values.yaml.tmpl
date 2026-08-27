@@ -873,6 +873,8 @@ conntrackGCInterval: ""
 # and has no effect when 'conntrackGCInterval' is set. This can be set to more frequently
 # clean up unused identities created from ToFQDN policies.
 conntrackGCMaxInterval: ""
+# -- (string) Batching interval for remote endpoints CT/NAT garbage collection.
+remoteEndpointCTGCBatchingInterval: "2s"
 # -- (string) Configure timeout in which Cilium will exit if CRDs are not available
 # @default -- `"5m"`
 crdWaitTimeout: ""

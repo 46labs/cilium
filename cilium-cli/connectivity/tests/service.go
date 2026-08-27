@@ -174,7 +174,7 @@ func (s *podToRemoteNodePort) Run(ctx context.Context, t *check.Test) {
 
 				// If src and dst pod are running on different nodes,
 				// call the Cilium Pod's host IP on the service's NodePort.
-				curlNodePort(ctx, s, t, fmt.Sprintf("curl-%d", i), &pod, svc, node, true, false)
+				CurlNodePort(ctx, s, t, fmt.Sprintf("curl-%d", i), &pod, svc, node, true, false)
 
 				i++
 			}
@@ -210,7 +210,7 @@ func (s *podToLocalNodePort) Run(ctx context.Context, t *check.Test) {
 					if pod.Pod.Status.HostIP == addr.Address {
 						// If src and dst pod are running on the same node,
 						// call the Cilium Pod's host IP on the service's NodePort.
-						curlNodePort(ctx, s, t, fmt.Sprintf("curl-%d", i), &pod, svc, node, true, false)
+						CurlNodePort(ctx, s, t, fmt.Sprintf("curl-%d", i), &pod, svc, node, true, false)
 
 						i++
 					}
@@ -220,7 +220,7 @@ func (s *podToLocalNodePort) Run(ctx context.Context, t *check.Test) {
 	}
 }
 
-func curlNodePort(ctx context.Context, s check.Scenario, t *check.Test,
+func CurlNodePort(ctx context.Context, s check.Scenario, t *check.Test,
 	name string, pod *check.Pod, svc check.Service, node *slimcorev1.Node,
 	validateFlows bool, secondaryNetwork bool) {
 
@@ -308,7 +308,7 @@ func (s *outsideToNodePort) Run(ctx context.Context, t *check.Test) {
 
 	for _, svc := range t.Context().EchoServices() {
 		for _, node := range t.Context().Nodes() {
-			curlNodePort(ctx, s, t, fmt.Sprintf("curl-%d", i), &clientPod, svc, node, validateFlows, t.Context().Params().SecondaryNetworkIface != "")
+			CurlNodePort(ctx, s, t, fmt.Sprintf("curl-%d", i), &clientPod, svc, node, validateFlows, t.Context().Params().SecondaryNetworkIface != "")
 			i++
 		}
 	}

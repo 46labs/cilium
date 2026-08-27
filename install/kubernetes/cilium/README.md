@@ -1019,6 +1019,7 @@ contributors across the globe, there is almost always someone available to help.
 | rbac.create | bool | `true` | Enable creation of Resource-Based Access Control configuration. |
 | readinessProbe.failureThreshold | int | `3` | failure threshold of readiness probe |
 | readinessProbe.periodSeconds | int | `30` | interval between checks of the readiness probe |
+| remoteEndpointCTGCBatchingInterval | string | `"2s"` | Batching interval for remote endpoints CT/NAT garbage collection. |
 | resourceQuotas | object | `{"cilium":{"hard":{"pods":"10k"}},"enabled":false,"operator":{"hard":{"pods":"15"}}}` | Enable resource quotas for priority classes used in the cluster. |
 | resources | object | `{}` | Agent resource limits & requests ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
 | rollOutCiliumPods | bool | `false` | Roll out cilium agent pods automatically when configmap is updated. |
