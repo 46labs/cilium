@@ -83,7 +83,7 @@ struct {
 #define fib_lookup mock_fib_lookup
 
 long mock_fib_lookup(__maybe_unused struct __ctx_buff * volatile ctx, struct bpf_fib_lookup *params,
-		     __maybe_unused int plen, __maybe_unused __u32 flags)
+		     __maybe_unused volatile int plen, __maybe_unused __u32 flags)
 {
 	__u32 key = 0;
 	struct mock_settings *settings = map_lookup_elem(&settings_map, &key);
