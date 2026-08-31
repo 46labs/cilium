@@ -22,7 +22,6 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	lbcell "github.com/cilium/cilium/pkg/loadbalancer/cell"
 	"github.com/cilium/cilium/pkg/maglev"
-	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/nodeipamconfig"
@@ -114,7 +113,6 @@ var Hive = hive.New(
 		func(cfg loadbalancer.TestConfig) *loadbalancer.TestConfig {
 			return &cfg
 		},
-		ctmap.NewFakeGCRunner,
 	),
 	lbcell.Cell,
 )
