@@ -39,7 +39,6 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer/reflectors"
 	"github.com/cilium/cilium/pkg/loadbalancer/writer"
 	"github.com/cilium/cilium/pkg/maglev"
-	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/source"
@@ -564,7 +563,6 @@ func testHive(maps lbmaps.LBMaps,
 					return services, endpoints
 				},
 				reflectors.EventStreamForBenchmark,
-				ctmap.NewFakeGCRunner,
 			),
 
 			daemonk8s.PodTableCell,

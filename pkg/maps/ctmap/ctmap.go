@@ -5,7 +5,6 @@ package ctmap
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -158,8 +157,8 @@ type GCFilter struct {
 	// removed
 	Time uint32
 
-	// MatchIPs is the list of IPs (port is optional) to remove from the conntrack table
-	MatchIPs map[netip.AddrPort]struct{}
+	// MatchIPs is the list of IPs to remove from the conntrack table
+	MatchIPs map[netip.Addr]struct{}
 
 	// EmitCTEntry is called, when non-nil, if filtering by ValidIPs and MatchIPs
 	// passes. It has no impact on CT GC, but can be used to iterate over valid
@@ -454,33 +453,15 @@ func (m *Map) cleanup(filter GCFilter, natMap *nat.Map, stats *gcStats, next fun
 	}
 }
 
-func ntohs(v uint16) uint16 {
-	var buf [2]byte
-	binary.LittleEndian.PutUint16(buf[:], v)
-	return binary.BigEndian.Uint16(buf[:])
-}
-
-func isIpPortMatched(matchIPs map[netip.AddrPort]struct{}, addr netip.Addr, port uint16) bool {
-	for ap := range matchIPs {
-		p := ap.Port()
-
-		if (p == 0 || p == ntohs(port)) && ap.Addr() == addr {
-			return true
-		}
-	}
-
-	return false
-}
-
 func (f GCFilter) doFiltering(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, nextHdr, flags uint8, entry *CtEntry) action {
 	if f.RemoveExpired && entry.Lifetime < f.Time {
 		return deleteEntry
 	}
 
 	if f.MatchIPs != nil {
-		srcMatch := isIpPortMatched(f.MatchIPs, srcIP, dstPort)
-		dstMatch := isIpPortMatched(f.MatchIPs, dstIP, srcPort)
-		if srcMatch || dstMatch {
+		_, srcIPExists := f.MatchIPs[srcIP]
+		_, dstIPExists := f.MatchIPs[dstIP]
+		if srcIPExists || dstIPExists {
 			return deleteEntry
 		}
 	}

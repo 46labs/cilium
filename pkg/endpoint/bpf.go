@@ -924,9 +924,9 @@ func (e *Endpoint) deleteMaps() []error {
 // scrubIPsInConntrackTableLocked will run the CTMap garbagecollector with the endpoint IPs.
 func (e *Endpoint) scrubIPsInConntrackTableLocked() {
 	e.ctMapGC.Run(ctmap.GCFilter{
-		MatchIPs: map[netip.AddrPort]struct{}{
-			netip.AddrPortFrom(e.IPv4, 0): {},
-			netip.AddrPortFrom(e.IPv6, 0): {},
+		MatchIPs: map[netip.Addr]struct{}{
+			e.IPv4: {},
+			e.IPv6: {},
 		},
 	})
 }
