@@ -1501,7 +1501,6 @@ func TestBPFOpsSourceRangeIndexes(t *testing.T) {
 		Maglev:         maglev,
 		DB:             db,
 		NodeAddresses:  nodeAddrs,
-		CTMapGC:        ctmap.NewFakeGCRunner(),
 	})
 
 	beSeq := func(bes ...loadbalancer.Backend) loadbalancer.BackendsSeq2 {
