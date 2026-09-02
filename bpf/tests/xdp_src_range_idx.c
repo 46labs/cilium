@@ -78,10 +78,10 @@ static __always_inline int craft_packet(struct __ctx_buff *ctx, __be16 client_po
 }
 
 /* Add a source range index entry: client source CIDR (optionally restricted to
- * a client source port) maps to a backend selection index.
+ * a client source port) maps to a pinned backend.
  */
 static __always_inline void add_src_range_idx(__be32 client_addr, __u8 cidr_bits,
-					      __u16 sport, __u8 index)
+					      __u16 sport, __u32 backend_id)
 {
 	struct lb4_src_range_idx_key key = {
 		.lpm_key = { 32 + cidr_bits, {} },
@@ -89,7 +89,7 @@ static __always_inline void add_src_range_idx(__be32 client_addr, __u8 cidr_bits
 		.sport = sport,
 		.addr = client_addr,
 	};
-	map_update_elem(&cilium_lb4_src_range_idx, &key, &index, BPF_ANY);
+	map_update_elem(&cilium_lb4_src_range_idx, &key, &backend_id, BPF_ANY);
 }
 
 static __always_inline void del_src_range_idx(__be32 client_addr, __u8 cidr_bits,
@@ -180,7 +180,7 @@ SETUP("xdp", "xdp_src_range_idx_exact")
 int xdp_src_range_idx_exact_setup(struct __ctx_buff *ctx)
 {
 	setup_test();
-	add_src_range_idx(CLIENT_IP, 32, CLIENT_PORT, 1);
+	add_src_range_idx(CLIENT_IP, 32, CLIENT_PORT, BACKEND_ID2);
 
 	return xdp_receive_packet(ctx);
 }
@@ -204,7 +204,7 @@ SETUP("xdp", "xdp_src_range_idx_wildcard")
 int xdp_src_range_idx_wildcard_setup(struct __ctx_buff *ctx)
 {
 	setup_test();
-	add_src_range_idx(CLIENT_IP, 32, 0, 0);
+	add_src_range_idx(CLIENT_IP, 32, 0, BACKEND_ID1);
 
 	return xdp_receive_packet(ctx);
 }
@@ -228,7 +228,7 @@ SETUP("xdp", "xdp_src_range_idx_cidr")
 int xdp_src_range_idx_cidr_setup(struct __ctx_buff *ctx)
 {
 	setup_test();
-	add_src_range_idx(CLIENT_CIDR, 24, 0, 1);
+	add_src_range_idx(CLIENT_CIDR, 24, 0, BACKEND_ID2);
 
 	return xdp_receive_packet(ctx);
 }

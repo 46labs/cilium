@@ -191,6 +191,10 @@ struct lb4_src_range_idx_key {
 	__u32 addr;
 };
 
+struct lb_src_range_idx_val {
+	__u32 backend_id;
+} __packed;
+
 struct lb6_src_range_idx_key {
 	struct bpf_lpm_trie_key lpm_key;
 	__u16 rev_nat_id;
@@ -254,7 +258,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
 	__type(key, struct lb6_src_range_idx_key);
-	__type(value, __u8);
+	__type(value, struct lb_src_range_idx_val);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, LB6_SRC_RANGE_MAP_SIZE);
 	__uint(map_flags, BPF_F_NO_PREALLOC);
@@ -335,7 +339,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
 	__type(key, struct lb4_src_range_idx_key);
-	__type(value, __u8);
+	__type(value, struct lb_src_range_idx_val);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, LB4_SRC_RANGE_MAP_SIZE);
 	__uint(map_flags, BPF_F_NO_PREALLOC);
@@ -1157,15 +1161,11 @@ lb6_select_backend_id_maglev(struct __ctx_buff *ctx __maybe_unused,
 #if defined(LB_SELECTION_PER_SERVICE)
 static __always_inline __u32
 lb6_select_backend_id_src_range_idx(struct __ctx_buff *ctx,
-				    struct lb6_key *key,
 				    const struct ipv6_ct_tuple *tuple,
 				    const struct lb6_service *svc)
 {
 	struct lb6_src_range_idx_key k;
-	__u8 *index;
-
-	if (unlikely(!svc->count))
-		return 0;
+	struct lb_src_range_idx_val *val;
 
 	/* tuple->saddr/dport are reversed; see lb6_select_backend_id_maglev(). */
 	k = (typeof(k)) {
@@ -1175,19 +1175,17 @@ lb6_select_backend_id_src_range_idx(struct __ctx_buff *ctx,
 		.addr = tuple->saddr,
 	};
 
-	index = map_lookup_elem(&cilium_lb6_src_range_idx, &k);
-	if (unlikely(!index)) {
+	val = map_lookup_elem(&cilium_lb6_src_range_idx, &k);
+	if (!val) {
 		k.sport = 0;
-		index = map_lookup_elem(&cilium_lb6_src_range_idx, &k);
+		val = map_lookup_elem(&cilium_lb6_src_range_idx, &k);
 	}
-	if (unlikely(!index))
+	if (!val)
 		return 0;
 
-	/* Backend slot 0 is always reserved for the service frontend. */
-	__u16 slot = (*index % svc->count) + 1;
-	const struct lb6_service *be = lb6_lookup_backend_slot(ctx, key, slot);
+	const struct lb6_backend *be = lb6_lookup_backend(ctx, val->backend_id);
 
-	return be ? be->backend_id : 0;
+	return be ? val->backend_id : 0;
 }
 #endif /* LB_SELECTION_PER_SERVICE */
 
@@ -1210,7 +1208,7 @@ select:
 	case LB_SELECTION_RANDOM:
 		return lb6_select_backend_id_random(ctx, key, tuple, svc);
 	case LB_SELECTION_SRC_RANGE_IDX:
-		return lb6_select_backend_id_src_range_idx(ctx, key, tuple, svc);
+		return lb6_select_backend_id_src_range_idx(ctx, tuple, svc);
 	default:
 		/* We only enter here upon downgrade if some future algorithm
 		 * annotation was select that we do not support as annotation.
@@ -1982,15 +1980,11 @@ lb4_select_backend_id_maglev(struct __ctx_buff *ctx __maybe_unused,
 #if defined(LB_SELECTION_PER_SERVICE)
 static __always_inline __u32
 lb4_select_backend_id_src_range_idx(struct __ctx_buff *ctx,
-				    struct lb4_key *key,
 				    const struct ipv4_ct_tuple *tuple,
 				    const struct lb4_service *svc)
 {
 	struct lb4_src_range_idx_key k;
-	__u8 *index;
-
-	if (unlikely(!svc->count))
-		return 0;
+	struct lb_src_range_idx_val *val;
 
 	/* tuple->saddr/dport are reversed; see lb4_select_backend_id_maglev(). */
 	k = (typeof(k)) {
@@ -2000,19 +1994,17 @@ lb4_select_backend_id_src_range_idx(struct __ctx_buff *ctx,
 		.addr = tuple->saddr,
 	};
 
-	index = map_lookup_elem(&cilium_lb4_src_range_idx, &k);
-	if (unlikely(!index)) {
+	val = map_lookup_elem(&cilium_lb4_src_range_idx, &k);
+	if (!val) {
 		k.sport = 0;
-		index = map_lookup_elem(&cilium_lb4_src_range_idx, &k);
+		val = map_lookup_elem(&cilium_lb4_src_range_idx, &k);
 	}
-	if (unlikely(!index))
+	if (!val)
 		return 0;
 
-	/* Backend slot 0 is always reserved for the service frontend. */
-	__u16 slot = (*index % svc->count) + 1;
-	const struct lb4_service *be = lb4_lookup_backend_slot(ctx, key, slot);
+	const struct lb4_backend *be = lb4_lookup_backend(ctx, val->backend_id);
 
-	return be ? be->backend_id : 0;
+	return be ? val->backend_id : 0;
 }
 #endif /* LB_SELECTION_PER_SERVICE */
 
@@ -2035,7 +2027,7 @@ select:
 	case LB_SELECTION_RANDOM:
 		return lb4_select_backend_id_random(ctx, key, tuple, svc);
 	case LB_SELECTION_SRC_RANGE_IDX:
-		return lb4_select_backend_id_src_range_idx(ctx, key, tuple, svc);
+		return lb4_select_backend_id_src_range_idx(ctx, tuple, svc);
 	default:
 		/* We only enter here upon downgrade if some future algorithm
 		 * annotation was select that we do not support as annotation.

@@ -181,6 +181,9 @@ func (in *UserConfig) DeepEqual(other *UserConfig) bool {
 	if in.LBSockRevNatEntries != other.LBSockRevNatEntries {
 		return false
 	}
+	if in.LBPinningEntries != other.LBPinningEntries {
+		return false
+	}
 	if ((in.NodePortRange != nil) && (other.NodePortRange != nil)) || ((in.NodePortRange == nil) != (other.NodePortRange == nil)) {
 		in, other := &in.NodePortRange, &other.NodePortRange
 		if other == nil {
