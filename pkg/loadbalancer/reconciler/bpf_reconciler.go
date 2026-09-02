@@ -29,6 +29,7 @@ import (
 	"github.com/cilium/cilium/pkg/lbipamconfig"
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/loadbalancer/maps"
+	"github.com/cilium/cilium/pkg/loadbalancer/reflectors"
 	"github.com/cilium/cilium/pkg/loadbalancer/writer"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -112,6 +113,8 @@ type BPFOps struct {
 	log       rateLimitingLogger
 	db        *statedb.DB
 	nodeAddrs statedb.Table[tables.NodeAddress]
+	fes       statedb.Table[*loadbalancer.Frontend]
+	writer    *writer.Writer
 
 	cfg           loadbalancer.Config
 	extCfg        loadbalancer.ExternalConfig
@@ -147,9 +150,9 @@ type BPFOps struct {
 	// This is used when updating to remove orphans.
 	prevSourceRanges map[loadbalancer.L3n4Addr]sets.Set[netip.Prefix]
 
-	// prevSourceRangeIndexes is the source range index entries that were
+	// prevSourcePortRanges is the source range index entries that were
 	// previously reconciled. This is used when updating to remove orphans.
-	prevSourceRangeIndexes map[loadbalancer.L3n4Addr]sets.Set[sourceRangeIndexKey]
+	prevSourcePortRanges map[loadbalancer.L3n4Addr]sets.Set[sourceAndPortRangeKey]
 
 	// wildcardReferences maps a Netip.Addr to a set of parent LoadBalancer or ClusterIP
 	// Service IDs. This is used to keep track of the relationship between real service
@@ -172,9 +175,9 @@ type nodePortAddrKey struct {
 	port uint16
 }
 
-// sourceRangeIndexKey identifies a source range index entry, that is a
+// sourceAndPortRangeKey identifies a source range index entry, that is a
 // client source CIDR optionally restricted to a client source port.
-type sourceRangeIndexKey struct {
+type sourceAndPortRangeKey struct {
 	prefix netip.Prefix
 	port   uint16
 }
@@ -189,14 +192,18 @@ type backendState struct {
 type bpfOpsParams struct {
 	cell.In
 
-	Lifecycle      cell.Lifecycle
-	Log            *slog.Logger
-	Config         loadbalancer.Config
-	ExternalConfig loadbalancer.ExternalConfig
-	LBMaps         maps.LBMaps
-	Maglev         *maglev.Maglev
-	DB             *statedb.DB
-	NodeAddresses  statedb.Table[tables.NodeAddress]
+	Lifecycle           cell.Lifecycle
+	Group               job.Group
+	Log                 *slog.Logger
+	Config              loadbalancer.Config
+	ExternalConfig      loadbalancer.ExternalConfig
+	LBMaps              maps.LBMaps
+	Maglev              *maglev.Maglev
+	DB                  *statedb.DB
+	NodeAddresses       statedb.Table[tables.NodeAddress]
+	LbSrcRangeGroupPods statedb.Table[reflectors.LbSrcRangeGroupPod]
+	Fes                 statedb.Table[*loadbalancer.Frontend]
+	Writer              *writer.Writer
 }
 
 const (
@@ -214,11 +221,106 @@ func newBPFOps(p bpfOpsParams) *BPFOps {
 		LBMaps:    p.LBMaps,
 		db:        p.DB,
 		nodeAddrs: p.NodeAddresses,
+		fes:       p.Fes,
+		writer:    p.Writer,
 	}
 	ops.setLastUpdatedAt()
 
 	p.Lifecycle.Append(cell.Hook{OnStart: ops.start})
+
+	p.Group.Add(
+		job.OneShot("start-lb-source-range-pods-observer", func(ctx context.Context, health cell.Health) error {
+			wtxn := ops.db.WriteTxn(p.LbSrcRangeGroupPods)
+			changeIterator, err := p.LbSrcRangeGroupPods.Changes(wtxn)
+			wtxn.Commit()
+			if err != nil {
+				return err
+			}
+
+			health.OK("OK")
+
+			for {
+				txn := ops.db.ReadTxn()
+
+				changes, watch := changeIterator.Next(txn)
+
+				for change := range changes {
+					ops.applySourceRangePod(txn, change.Object, change.Deleted)
+				}
+
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-watch:
+				}
+			}
+		}),
+	)
+
 	return ops
+}
+
+// applySourceRangePod applies the source ranges carried by a [reflectors.LbSrcRangeGroupPod]
+// to the backend(s) matching the pod's IP. When the pod has been deleted, the matching
+// backend's source ranges are cleared instead of being replaced.
+func (ops *BPFOps) applySourceRangePod(txn statedb.ReadTxn, pod reflectors.LbSrcRangeGroupPod, deleted bool) {
+	var sourceRanges []loadbalancer.SourceAndPortRangeEntry
+
+	if pod.SourceRanges == "" {
+		deleted = true
+	}
+
+	if !deleted {
+		var err error
+		sourceRanges, err = loadbalancer.ParseSourceRangeIndexes(pod.SourceRanges)
+		if err != nil {
+			ops.log.Warn("backend source ranges parsing",
+				logfields.Error, err,
+			)
+			return
+		}
+	}
+
+	fes := map[*loadbalancer.Frontend][]loadbalancer.Backend{}
+
+	for f := range ops.fes.All(txn) {
+		if !f.Service.SourceAndPortRangeLbEnabled {
+			continue
+		}
+
+		for b := range f.Backends {
+			if b.Address.Addr() == pod.IP {
+				if _, ok := fes[f]; !ok {
+					fes[f] = []loadbalancer.Backend{}
+				}
+
+				backend := *b
+				backend.SourceRanges = sourceRanges
+
+				fes[f] = append(fes[f], backend)
+			}
+		}
+	}
+
+	if len(fes) == 0 {
+		return
+	}
+
+	wtxn := ops.writer.WriteTxn()
+
+	for frontend, newBes := range fes {
+		if len(newBes) == 0 {
+			continue
+		}
+
+		if err := ops.writer.UpsertBackends(wtxn, frontend.ServiceName, newBes[0].Source, slices.Values(newBes)); err != nil {
+			ops.log.Warn("backend source ranges update",
+				logfields.Error, err,
+			)
+		}
+	}
+
+	wtxn.Commit()
 }
 
 func (ops *BPFOps) GetLastUpdatedAt() time.Time {
@@ -247,7 +349,7 @@ func (ops *BPFOps) ResetAndRestore() (err error) {
 	ops.wildcardReferences = map[netip.Addr][]loadbalancer.ServiceID{}
 	ops.nodePortAddrByPort = map[nodePortAddrKey][]netip.Addr{}
 	ops.prevSourceRanges = map[loadbalancer.L3n4Addr]sets.Set[netip.Prefix]{}
-	ops.prevSourceRangeIndexes = map[loadbalancer.L3n4Addr]sets.Set[sourceRangeIndexKey]{}
+	ops.prevSourcePortRanges = map[loadbalancer.L3n4Addr]sets.Set[sourceAndPortRangeKey]{}
 
 	// Restore backend IDs
 	backendIDToAddress := map[loadbalancer.BackendID]loadbalancer.L3n4Addr{}
@@ -497,7 +599,7 @@ func (ops *BPFOps) deleteFrontend(fe *loadbalancer.Frontend) error {
 	}
 	delete(ops.prevSourceRanges, fe.Address)
 
-	for key := range ops.prevSourceRangeIndexes[fe.Address] {
+	for key := range ops.prevSourcePortRanges[fe.Address] {
 		if key.prefix.Addr().Is6() != fe.Address.IsIPv6() {
 			continue
 		}
@@ -508,7 +610,7 @@ func (ops *BPFOps) deleteFrontend(fe *loadbalancer.Frontend) error {
 			return fmt.Errorf("delete source range index: %w", err)
 		}
 	}
-	delete(ops.prevSourceRangeIndexes, fe.Address)
+	delete(ops.prevSourcePortRanges, fe.Address)
 
 	// Cleanup any wildcard entries this fe might be associated with.
 	if loadbalancer.IsWildcardCandidate(fe) && ops.isWildcardClass(fe.Service) {
@@ -699,8 +801,8 @@ func (ops *BPFOps) pruneSourceRanges() error {
 }
 
 func (ops *BPFOps) pruneSourceRangeIndexes() error {
-	toDelete := []maps.SourceRangeIndexKey{}
-	cb := func(key maps.SourceRangeIndexKey, value *maps.SourceRangeIndexValue) {
+	toDelete := []maps.SourceAndPortRangeKey{}
+	cb := func(key maps.SourceAndPortRangeKey, value *maps.SourceAndPortRangeValue) {
 		key = key.ToHost()
 
 		// A SourceRangeIndex is OK if there's a service with this ID and the
@@ -711,9 +813,9 @@ func (ops *BPFOps) pruneSourceRangeIndexes() error {
 			cidrAddr, _ := netip.AddrFromSlice(cidr.IP)
 			ones, _ := cidr.Mask.Size()
 			prefix := netip.PrefixFrom(cidrAddr, ones)
-			var entries sets.Set[sourceRangeIndexKey]
-			entries, ok = ops.prevSourceRangeIndexes[addr]
-			ok = ok && entries.Has(sourceRangeIndexKey{prefix, key.GetPort()})
+			var entries sets.Set[sourceAndPortRangeKey]
+			entries, ok = ops.prevSourcePortRanges[addr]
+			ok = ok && entries.Has(sourceAndPortRangeKey{prefix, key.GetPort()})
 		}
 		if !ok {
 			ops.log.Debug("pruneSourceRangeIndexes: enqueing for deletion",
@@ -976,6 +1078,16 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 
 	activeCount, terminatingCount, inactiveCount := 0, 0, 0
 
+	// Update source range indexes. Maintain the invariant that
+	// [ops.prevSourcePortRanges] always reflects what was successfully
+	// added to the BPF maps in order not to leak entries on failed operation.
+	prevSourcePortRanges := ops.prevSourcePortRanges[fe.Address]
+	if prevSourcePortRanges == nil {
+		prevSourcePortRanges = sets.New[sourceAndPortRangeKey]()
+		ops.prevSourcePortRanges[fe.Address] = prevSourcePortRanges
+	}
+	orphanSourcePortRanges := prevSourcePortRanges.Clone()
+
 	// Update backends that are new or changed.
 	slotID := 1
 	for _, be := range orderedBackends {
@@ -1072,6 +1184,35 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 		}
 
 		slotID++
+
+		ranges := map[sourceAndPortRangeKey]loadbalancer.BackendID{}
+
+		for _, entry := range be.SourceRanges {
+			if entry.Prefix.Addr().Is6() != fe.Address.IsIPv6() {
+				continue
+			}
+
+			key := sourceAndPortRangeKey{entry.Prefix, entry.Port}
+
+			if existingID, ok := ranges[key]; ok {
+				ops.log.Warn("Multiple backends pinned to the same source range, ignoring one",
+					logfields.BackendID, existingID,
+					logfields.Address, be.Address)
+				continue
+			}
+
+			err := ops.LBMaps.UpdateSourceRangeIndex(
+				srcRangeIndexKey(entry.Prefix, entry.Port, uint16(feID), fe.Address.IsIPv6()),
+				&maps.SourceAndPortRangeValue{BackendID: uint32(beID)},
+			)
+			if err != nil {
+				return fmt.Errorf("update source/port range value: %w", err)
+			}
+
+			ranges[key] = beID
+			orphanSourcePortRanges.Delete(key)
+			prevSourcePortRanges.Insert(key)
+		}
 	}
 	backendCount := slotID - 1
 
@@ -1132,33 +1273,8 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 		prevSourceRanges.Delete(cidr)
 	}
 
-	// Update source range indexes. Maintain the invariant that
-	// [ops.prevSourceRangeIndexes] always reflects what was successfully
-	// added to the BPF maps in order not to leak entries on failed operation.
-	prevSourceRangeIndexes := ops.prevSourceRangeIndexes[fe.Address]
-	if prevSourceRangeIndexes == nil {
-		prevSourceRangeIndexes = sets.New[sourceRangeIndexKey]()
-		ops.prevSourceRangeIndexes[fe.Address] = prevSourceRangeIndexes
-	}
-	orphanSourceRangeIndexes := prevSourceRangeIndexes.Clone()
-	for _, entry := range fe.Service.SourceRangeIndexes {
-		if entry.Prefix.Addr().Is6() != fe.Address.IsIPv6() {
-			continue
-		}
-
-		key := sourceRangeIndexKey{entry.Prefix, entry.Port}
-		err := ops.LBMaps.UpdateSourceRangeIndex(
-			srcRangeIndexKey(entry.Prefix, entry.Port, uint16(feID), fe.Address.IsIPv6()),
-			&maps.SourceRangeIndexValue{Index: entry.Index},
-		)
-		if err != nil {
-			return fmt.Errorf("update source range index: %w", err)
-		}
-
-		orphanSourceRangeIndexes.Delete(key)
-		prevSourceRangeIndexes.Insert(key)
-	}
-	for key := range orphanSourceRangeIndexes {
+	// Remove orphan source-port ranges.
+	for key := range orphanSourcePortRanges {
 		if key.prefix.Addr().Is6() != fe.Address.IsIPv6() {
 			continue
 		}
@@ -1169,7 +1285,7 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 			return fmt.Errorf("delete source range index: %w", err)
 		}
 
-		prevSourceRangeIndexes.Delete(key)
+		prevSourcePortRanges.Delete(key)
 	}
 
 	// Update RevNat
@@ -1231,7 +1347,7 @@ func (ops *BPFOps) lbAlgorithm(fe *loadbalancer.Frontend) loadbalancer.SVCLoadBa
 	// The source range index algorithm is enabled by the annotation itself,
 	// independently of the global algorithm annotation option. ClusterIP
 	// frontends are excluded to not drop internal traffic.
-	if len(fe.Service.SourceRangeIndexes) > 0 {
+	if fe.Service.SourceAndPortRangeLbEnabled {
 		switch fe.Type {
 		case loadbalancer.SVCTypeNodePort,
 			loadbalancer.SVCTypeLoadBalancer,
@@ -1712,7 +1828,7 @@ func (ops *BPFOps) StateSummary() string {
 	fmt.Fprintf(&b, "backendReferences: %d\n", len(ops.backendReferences))
 	fmt.Fprintf(&b, "nodePortAddrByPort: %d\n", len(ops.nodePortAddrByPort))
 	fmt.Fprintf(&b, "prevSourceRanges: %d\n", len(ops.prevSourceRanges))
-	fmt.Fprintf(&b, "prevSourceRangeIndexes: %d\n", len(ops.prevSourceRangeIndexes))
+	fmt.Fprintf(&b, "prevSourcePortRanges: %d\n", len(ops.prevSourcePortRanges))
 	fmt.Fprintf(&b, "restoredQuarantines: %d\n", len(ops.restoredQuarantinedBackends))
 	fmt.Fprintf(&b, "wildcardReferences: %d\n", len(ops.wildcardReferences))
 
@@ -1739,7 +1855,7 @@ func srcRangeKey(cidr netip.Prefix, revNATID uint16, ipv6 bool) maps.SourceRange
 	}
 }
 
-func srcRangeIndexKey(cidr netip.Prefix, port uint16, revNATID uint16, ipv6 bool) maps.SourceRangeIndexKey {
+func srcRangeIndexKey(cidr netip.Prefix, port uint16, revNATID uint16, ipv6 bool) maps.SourceAndPortRangeKey {
 	const (
 		// sizeof(SourceRangeIndexKey{4,6}.RevNATID)+sizeof(Sport)
 		lpmPrefixLen = 16 + 16
@@ -1748,7 +1864,7 @@ func srcRangeIndexKey(cidr netip.Prefix, port uint16, revNATID uint16, ipv6 bool
 	id := byteorder.HostToNetwork16(revNATID)
 	sport := byteorder.HostToNetwork16(port)
 	if ipv6 {
-		key := &maps.SourceRangeIndexKey6{
+		key := &maps.SourceAndPortRangeKey6{
 			PrefixLen: uint32(ones) + lpmPrefixLen,
 			RevNATID:  id,
 			Sport:     sport,
@@ -1757,7 +1873,7 @@ func srcRangeIndexKey(cidr netip.Prefix, port uint16, revNATID uint16, ipv6 bool
 		copy(key.Address[:], as16[:])
 		return key
 	} else {
-		key := &maps.SourceRangeIndexKey4{
+		key := &maps.SourceAndPortRangeKey4{
 			PrefixLen: uint32(ones) + lpmPrefixLen,
 			RevNATID:  id,
 			Sport:     sport,

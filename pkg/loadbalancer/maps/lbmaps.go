@@ -94,9 +94,9 @@ type sourceRangeMaps interface {
 }
 
 type sourceRangeIndexMaps interface {
-	UpdateSourceRangeIndex(SourceRangeIndexKey, *SourceRangeIndexValue) error
-	DeleteSourceRangeIndex(SourceRangeIndexKey) error
-	DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error
+	UpdateSourceRangeIndex(SourceAndPortRangeKey, *SourceAndPortRangeValue) error
+	DeleteSourceRangeIndex(SourceAndPortRangeKey) error
+	DumpSourceRangeIndex(cb func(SourceAndPortRangeKey, *SourceAndPortRangeValue)) error
 }
 
 type maglevMaps interface {
@@ -288,10 +288,10 @@ func NewSourceRange6Map(maxEntries int) *bpf.Map {
 
 func NewSourceRangeIndex4Map(maxEntries int) *bpf.Map {
 	return bpf.NewMap(
-		SourceRangeIndex4MapName,
+		SourceAndPortRange4MapName,
 		ebpf.LPMTrie,
-		&SourceRangeIndexKey4{},
-		&SourceRangeIndexValue{},
+		&SourceAndPortRangeKey4{},
+		&SourceAndPortRangeValue{},
 		maxEntries,
 		0,
 	)
@@ -299,10 +299,10 @@ func NewSourceRangeIndex4Map(maxEntries int) *bpf.Map {
 
 func NewSourceRangeIndex6Map(maxEntries int) *bpf.Map {
 	return bpf.NewMap(
-		SourceRangeIndex6MapName,
+		SourceAndPortRange6MapName,
 		ebpf.LPMTrie,
-		&SourceRangeIndexKey6{},
-		&SourceRangeIndexValue{},
+		&SourceAndPortRangeKey6{},
+		&SourceAndPortRangeValue{},
 		maxEntries,
 		0,
 	)
@@ -693,12 +693,12 @@ func (r *BPFLBMaps) UpdateSourceRange(key SourceRangeKey, value *SourceRangeValu
 }
 
 // DeleteSourceRangeIndex implements lbmaps.
-func (r *BPFLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
+func (r *BPFLBMaps) DeleteSourceRangeIndex(key SourceAndPortRangeKey) error {
 	var err error
 	switch key.(type) {
-	case *SourceRangeIndexKey4:
+	case *SourceAndPortRangeKey4:
 		_, err = r.sourceRangeIndex4Map.SilentDelete(key)
-	case *SourceRangeIndexKey6:
+	case *SourceAndPortRangeKey6:
 		_, err = r.sourceRangeIndex6Map.SilentDelete(key)
 	default:
 		panic("unknown SourceRangeIndexKey")
@@ -707,7 +707,7 @@ func (r *BPFLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
 }
 
 // DumpSourceRangeIndex implements lbmaps.
-func (r *BPFLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error {
+func (r *BPFLBMaps) DumpSourceRangeIndex(cb func(SourceAndPortRangeKey, *SourceAndPortRangeValue)) error {
 	return errors.Join(
 		dumpMap(r.sourceRangeIndex4Map, cb),
 		dumpMap(r.sourceRangeIndex6Map, cb),
@@ -715,11 +715,11 @@ func (r *BPFLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRan
 }
 
 // UpdateSourceRangeIndex implements lbmaps.
-func (r *BPFLBMaps) UpdateSourceRangeIndex(key SourceRangeIndexKey, value *SourceRangeIndexValue) error {
+func (r *BPFLBMaps) UpdateSourceRangeIndex(key SourceAndPortRangeKey, value *SourceAndPortRangeValue) error {
 	switch key.(type) {
-	case *SourceRangeIndexKey4:
+	case *SourceAndPortRangeKey4:
 		return r.sourceRangeIndex4Map.Update(key, value)
-	case *SourceRangeIndexKey6:
+	case *SourceAndPortRangeKey6:
 		return r.sourceRangeIndex6Map.Update(key, value)
 	default:
 		panic("unknown SourceRangeIndexKey")
@@ -959,7 +959,7 @@ func (f *FaultyLBMaps) UpdateSourceRange(key SourceRangeKey, value *SourceRangeV
 }
 
 // DeleteSourceRangeIndex implements lbmaps.
-func (f *FaultyLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
+func (f *FaultyLBMaps) DeleteSourceRangeIndex(key SourceAndPortRangeKey) error {
 	if f.isFaulty() {
 		return errFaulty
 	}
@@ -967,7 +967,7 @@ func (f *FaultyLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
 }
 
 // DumpSourceRangeIndex implements lbmaps.
-func (f *FaultyLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error {
+func (f *FaultyLBMaps) DumpSourceRangeIndex(cb func(SourceAndPortRangeKey, *SourceAndPortRangeValue)) error {
 	if f.isFaulty() {
 		return errFaulty
 	}
@@ -975,7 +975,7 @@ func (f *FaultyLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *Source
 }
 
 // UpdateSourceRangeIndex implements lbmaps.
-func (f *FaultyLBMaps) UpdateSourceRangeIndex(key SourceRangeIndexKey, value *SourceRangeIndexValue) error {
+func (f *FaultyLBMaps) UpdateSourceRangeIndex(key SourceAndPortRangeKey, value *SourceAndPortRangeValue) error {
 	if f.isFaulty() {
 		return errFaulty
 	}
@@ -1241,7 +1241,7 @@ func (f *FakeLBMaps) DeleteSourceRange(key SourceRangeKey) error {
 }
 
 // DeleteSourceRangeIndex implements lbmaps.
-func (f *FakeLBMaps) DeleteSourceRangeIndex(key SourceRangeIndexKey) error {
+func (f *FakeLBMaps) DeleteSourceRangeIndex(key SourceAndPortRangeKey) error {
 	return f.srcRangeIdx.delete(key)
 }
 
@@ -1282,7 +1282,7 @@ func (f *FakeLBMaps) DumpSourceRange(cb func(SourceRangeKey, *SourceRangeValue))
 }
 
 // DumpSourceRangeIndex implements lbmaps.
-func (f *FakeLBMaps) DumpSourceRangeIndex(cb func(SourceRangeIndexKey, *SourceRangeIndexValue)) error {
+func (f *FakeLBMaps) DumpSourceRangeIndex(cb func(SourceAndPortRangeKey, *SourceAndPortRangeValue)) error {
 	dumpFakeBPFMap(&f.srcRangeIdx, cb)
 	return nil
 }
@@ -1318,7 +1318,7 @@ func (f *FakeLBMaps) UpdateSourceRange(key SourceRangeKey, value *SourceRangeVal
 }
 
 // UpdateSourceRangeIndex implements lbmaps.
-func (f *FakeLBMaps) UpdateSourceRangeIndex(key SourceRangeIndexKey, value *SourceRangeIndexValue) error {
+func (f *FakeLBMaps) UpdateSourceRangeIndex(key SourceAndPortRangeKey, value *SourceAndPortRangeValue) error {
 	return f.srcRangeIdx.update(key, value)
 }
 

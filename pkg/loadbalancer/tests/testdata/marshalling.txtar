@@ -69,7 +69,7 @@ test/echo  [2002::2]:8080/TCP
   "HealthCheckNodePort": 0,
   "LoopbackHostPort": false,
   "SourceRanges": null,
-  "SourceRangeIndexes": null,
+  "SourceAndPortRangeLbEnabled": false,
   "PortNames": {
     "http": 80
   },
@@ -101,7 +101,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRanges": null
     }
   ],
   "HealthCheckBackends": [
@@ -118,7 +119,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRanges": null
     }
   ],
   "ID": 1,
@@ -149,7 +151,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRanges": null
     }
   ],
   "HealthCheckBackends": [
@@ -166,7 +169,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRanges": null
     }
   ],
   "ID": 2,
@@ -186,7 +190,8 @@ test/echo  [2002::2]:8080/TCP
   "Source": "k8s",
   "State": 0,
   "Unhealthy": false,
-  "UnhealthyUpdatedAt": null
+  "UnhealthyUpdatedAt": null,
+  "SourceRanges": null
 }
 {
   "ServiceName": "test/echo",
@@ -201,7 +206,8 @@ test/echo  [2002::2]:8080/TCP
   "Source": "k8s",
   "State": 0,
   "Unhealthy": false,
-  "UnhealthyUpdatedAt": null
+  "UnhealthyUpdatedAt": null,
+  "SourceRanges": null
 }
 -- services-expected.yaml --
 name: test/echo
@@ -221,7 +227,7 @@ proxyredirect: null
 healthchecknodeport: 0
 loopbackhostport: false
 sourceranges: []
-sourcerangeindexes: []
+sourceandportrangelbenabled: false
 portnames:
     http: 80
 trafficdistribution: ""
@@ -249,6 +255,7 @@ backends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourceranges: []
 healthcheckbackends:
     - servicename: test/echo
       address: 10.244.1.1:8080/TCP
@@ -262,6 +269,7 @@ healthcheckbackends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourceranges: []
 id: 1
 redirectto: null
 ---
@@ -288,6 +296,7 @@ backends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourceranges: []
 healthcheckbackends:
     - servicename: test/echo
       address: '[2002::2]:8080/TCP'
@@ -301,6 +310,7 @@ healthcheckbackends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourceranges: []
 id: 2
 redirectto: null
 -- backends-expected.yaml --
@@ -316,6 +326,7 @@ source: k8s
 state: 0
 unhealthy: false
 unhealthyupdatedat: null
+sourceranges: []
 ---
 servicename: test/echo
 address: '[2002::2]:8080/TCP'
@@ -329,6 +340,7 @@ source: k8s
 state: 0
 unhealthy: false
 unhealthyupdatedat: null
+sourceranges: []
 -- service.yaml --
 apiVersion: v1
 kind: Service

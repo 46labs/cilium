@@ -80,6 +80,7 @@ type reflectorParams struct {
 	Clientset              client.Clientset
 	EventStream            stream.Observable[event]
 	Pods                   statedb.Table[daemonK8s.LocalPod]
+	LbSrcRangeGroupPods    statedb.Table[LbSrcRangeGroupPod]
 	Writer                 *writer.Writer
 	Config                 loadbalancer.Config
 	ExtConfig              loadbalancer.ExternalConfig
@@ -216,6 +217,22 @@ func runPodReflector(ctx context.Context, health cell.Health, p reflectorParams,
 	return nil
 }
 
+func (p *reflectorParams) updateBackendsWithSourceRangeGroup(backend *loadbalancer.Backend) {
+	txn := p.DB.ReadTxn()
+
+	pod, _, found := p.LbSrcRangeGroupPods.Get(txn, PodByIp(backend.Address.Addr()))
+
+	if found {
+		if entries, err := loadbalancer.ParseSourceRangeIndexes(pod.SourceRanges); err != nil {
+			p.Log.Warn("backend source ranges parsing",
+				logfields.Error, err,
+			)
+		} else {
+			backend.SourceRanges = entries
+		}
+	}
+}
+
 func runServiceEndpointsReflector(ctx context.Context, health cell.Health, p reflectorParams, initServices, initEndpoints func(writer.WriteTxn)) error {
 	rh := newReflectorHealth(health, p.Log)
 
@@ -326,7 +343,7 @@ func runServiceEndpointsReflector(ctx context.Context, health cell.Health, p ref
 				servicesToRefresh.Delete(name)
 
 				// Convert [k8s.Endpoints] to [loadbalancer.Backend]
-				backends := convertEndpoints(p.Log, p.ExtConfig, name, maps.All(eps.Backends))
+				backends := convertEndpoints(p.Log, p.ExtConfig, name, maps.All(eps.Backends), p.updateBackendsWithSourceRangeGroup)
 
 				err := p.Writer.UpsertBackends(txn, name, source.Kubernetes, backends)
 				rh.update("eps:"+name.String(), err)
@@ -358,7 +375,7 @@ func runServiceEndpointsReflector(ctx context.Context, health cell.Health, p ref
 			var err error
 
 			// Convert [k8s.Endpoints] to [loadbalancer.Backend]
-			backends := convertEndpoints(p.Log, p.ExtConfig, name, allEps.Backends())
+			backends := convertEndpoints(p.Log, p.ExtConfig, name, allEps.Backends(), p.updateBackendsWithSourceRangeGroup)
 
 			// Find orphaned backends. We are using iter.Seq to avoid unnecessary allocations.
 			var orphans iter.Seq[loadbalancer.L3n4Addr] = func(yield func(loadbalancer.L3n4Addr) bool) {

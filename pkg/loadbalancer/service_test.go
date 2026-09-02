@@ -23,7 +23,7 @@ func TestParseSourceRangeIndexes(t *testing.T) {
 	tests := []struct {
 		name    string
 		value   string
-		want    []SourceRangeIndexEntry
+		want    []SourceAndPortRangeEntry
 		wantErr string
 	}{
 		{
@@ -33,48 +33,39 @@ func TestParseSourceRangeIndexes(t *testing.T) {
 		},
 		{
 			name:  "multi-CIDR group shares index",
-			value: "10.0.0.0/8, 10.1.0.0/16; 20.0.0.0/8:5060",
-			want: []SourceRangeIndexEntry{
-				{Index: 0, Prefix: mustPrefix(t, "10.0.0.0/8")},
-				{Index: 0, Prefix: mustPrefix(t, "10.1.0.0/16")},
-				{Index: 1, Prefix: mustPrefix(t, "20.0.0.0/8"), Port: 5060},
+			value: "10.0.0.0/8, 10.1.0.0/16",
+			want: []SourceAndPortRangeEntry{
+				{Prefix: mustPrefix(t, "10.0.0.0/8")},
+				{Prefix: mustPrefix(t, "10.1.0.0/16")},
 			},
 		},
 		{
 			name:  "comma-only value is a single group with per-CIDR ports",
 			value: "10.0.0.0/8,10.1.0.0/16:5060",
-			want: []SourceRangeIndexEntry{
-				{Index: 0, Prefix: mustPrefix(t, "10.0.0.0/8")},
-				{Index: 0, Prefix: mustPrefix(t, "10.1.0.0/16"), Port: 5060},
+			want: []SourceAndPortRangeEntry{
+				{Prefix: mustPrefix(t, "10.0.0.0/8")},
+				{Prefix: mustPrefix(t, "10.1.0.0/16"), Port: 5060},
 			},
 		},
 		{
 			name:  "bare IP defaults to full-length prefix",
 			value: "192.168.1.1",
-			want: []SourceRangeIndexEntry{
-				{Index: 0, Prefix: mustPrefix(t, "192.168.1.1/32")},
+			want: []SourceAndPortRangeEntry{
+				{Prefix: mustPrefix(t, "192.168.1.1/32")},
 			},
 		},
 		{
 			name:  "IPv6 bracketed with port",
 			value: "[fd00::1]/128:5060",
-			want: []SourceRangeIndexEntry{
-				{Index: 0, Prefix: mustPrefix(t, "fd00::1/128"), Port: 5060},
+			want: []SourceAndPortRangeEntry{
+				{Prefix: mustPrefix(t, "fd00::1/128"), Port: 5060},
 			},
 		},
 		{
 			name:  "IPv6 unbracketed full CIDR",
 			value: "fd00::1/128",
-			want: []SourceRangeIndexEntry{
-				{Index: 0, Prefix: mustPrefix(t, "fd00::1/128")},
-			},
-		},
-		{
-			name:  "empty groups are skipped",
-			value: "10.0.0.0/8;;20.0.0.0/8",
-			want: []SourceRangeIndexEntry{
-				{Index: 0, Prefix: mustPrefix(t, "10.0.0.0/8")},
-				{Index: 1, Prefix: mustPrefix(t, "20.0.0.0/8")},
+			want: []SourceAndPortRangeEntry{
+				{Prefix: mustPrefix(t, "fd00::1/128")},
 			},
 		},
 		{
@@ -102,6 +93,21 @@ func TestParseSourceRangeIndexes(t *testing.T) {
 			value:   "[fd00::1/128",
 			wantErr: "missing closing bracket",
 		},
+		{
+			name:    "whitespace-only value is treated as empty",
+			value:   "   ",
+			want:    nil,
+		},
+		{
+			name:    "stray comma produces an empty entry error instead of silently dropping prior entries",
+			value:   "10.0.0.0/8,,10.1.0.0/16",
+			wantErr: "empty entry",
+		},
+		{
+			name:    "trailing comma produces an empty entry error",
+			value:   "10.0.0.0/8,",
+			wantErr: "empty entry",
+		},
 	}
 
 	for _, tt := range tests {
@@ -121,17 +127,4 @@ func TestParseSourceRangeIndexes(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestParseSourceRangeIndexesTooMany(t *testing.T) {
-	t.Run("too many groups", func(t *testing.T) {
-		groups := make([]string, 258)
-		for i := range groups {
-			groups[i] = "10.0.0.0/8"
-		}
-		_, err := ParseSourceRangeIndexes(strings.Join(groups, ";"))
-		if err == nil || !strings.Contains(err.Error(), "too many source range index groups") {
-			t.Fatalf("expected group overflow error, got %v", err)
-		}
-	})
 }
