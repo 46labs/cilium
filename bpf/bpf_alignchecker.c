@@ -50,6 +50,7 @@ add_type(struct lb4_src_range_key);
 add_type(struct lb6_src_range_key);
 add_type(struct lb4_src_range_idx_key);
 add_type(struct lb6_src_range_idx_key);
+add_type(struct lb_src_range_idx_val);
 
 #include "lib/metrics.h"
 add_type(struct metrics_key);

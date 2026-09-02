@@ -566,6 +566,7 @@ func testHive(maps lbmaps.LBMaps,
 			),
 
 			daemonk8s.PodTableCell,
+			reflectors.LbSrcRangeGroupPodTableCell,
 
 			cell.Invoke(func(db_ *statedb.DB, w *writer.Writer, bo_ *lbreconciler.BPFOps) {
 				*db = db_

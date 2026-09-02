@@ -17,6 +17,8 @@ var Cell = cell.Module(
 	"loadbalancer-reflectors",
 	"Reflects external state to load-balancing tables",
 
+	LbSrcRangeGroupPodTableCell,
+
 	// Reflects Kubernetes Services and Endpoint(Slices) to load-balancing tables
 	K8sReflectorCell,
 
