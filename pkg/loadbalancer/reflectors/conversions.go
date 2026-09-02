@@ -405,7 +405,13 @@ func getIPFamilies(svc *slim_corev1.Service) []slim_corev1.IPFamily {
 	return svc.Spec.IPFamilies
 }
 
-func convertEndpoints(rawlog *slog.Logger, cfg loadbalancer.ExternalConfig, svcName loadbalancer.ServiceName, bes iter.Seq2[cmtypes.AddrCluster, *k8s.Backend]) iter.Seq[loadbalancer.Backend] {
+func convertEndpoints(
+	rawlog *slog.Logger,
+	cfg loadbalancer.ExternalConfig,
+	svcName loadbalancer.ServiceName,
+	bes iter.Seq2[cmtypes.AddrCluster, *k8s.Backend],
+	transformBackend func(*loadbalancer.Backend),
+) iter.Seq[loadbalancer.Backend] {
 	return func(yield func(be loadbalancer.Backend) bool) {
 		// Lazily construct the augmented logger as we very rarely log here.
 		log := sync.OnceValue(func() *slog.Logger {
@@ -485,6 +491,7 @@ func convertEndpoints(rawlog *slog.Logger, cfg loadbalancer.ExternalConfig, svcN
 						ForZones: be.HintsForZones,
 					}
 				}
+				transformBackend(&bep)
 				if !yield(bep) {
 					break
 				}

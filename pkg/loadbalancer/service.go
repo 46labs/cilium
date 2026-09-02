@@ -89,9 +89,11 @@ type Service struct {
 	SourceRanges []netip.Prefix
 
 	// SourceRangeIndexes if non-empty maps client source CIDRs (optionally
-	// restricted to a client source port) to a deterministic backend selection
-	// index. Entries sharing an Index form a trunk group; the backend selected
-	// for a matching client is computed as index % backend-count.
+	// restricted to a client source port) to a trunk group index. Entries
+	// sharing an Index form a trunk group; the backend selected for a
+	// matching client is whichever backend's pod carries a
+	// PodSourceRangeGroup label matching that Index. If no backend currently
+	// claims the index, matching traffic is dropped.
 	SourceRangeIndexes []SourceRangeIndexEntry
 
 	// PortNames maps a port name to a port number.

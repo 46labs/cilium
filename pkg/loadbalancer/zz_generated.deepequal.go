@@ -69,6 +69,13 @@ func (in *Backend) deepEqual(other *Backend) bool {
 	if in.sourcePriority != other.sourcePriority {
 		return false
 	}
+	if (in.SourceRangeGroup == nil) != (other.SourceRangeGroup == nil) {
+		return false
+	} else if in.SourceRangeGroup != nil {
+		if *in.SourceRangeGroup != *other.SourceRangeGroup {
+			return false
+		}
+	}
 
 	return true
 }
@@ -179,6 +186,9 @@ func (in *UserConfig) DeepEqual(other *UserConfig) bool {
 		return false
 	}
 	if in.LBSockRevNatEntries != other.LBSockRevNatEntries {
+		return false
+	}
+	if in.LBPinningEntries != other.LBPinningEntries {
 		return false
 	}
 	if ((in.NodePortRange != nil) && (other.NodePortRange != nil)) || ((in.NodePortRange == nil) != (other.NodePortRange == nil)) {

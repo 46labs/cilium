@@ -1524,30 +1524,40 @@ func TestBPFOpsSourceRangeIndexes(t *testing.T) {
 		return n
 	}
 
-	newNodePort := func(srcIndexes []loadbalancer.SourceRangeIndexEntry) *loadbalancer.Frontend {
+	newNodePort := func(srcIndexes []loadbalancer.SourceRangeIndexEntry, bes ...loadbalancer.Backend) *loadbalancer.Frontend {
 		svc := baseService
 		svc.SourceRangeIndexes = srcIndexes
 		fe := baseFrontend
 		fe.Type = NodePort
 		fe.Address = frontendAddrs[0]
 		fe.Service = &svc
-		fe.Backends = beSeq(baseBackend, newTestBackend(backend2, loadbalancer.BackendStateActive))
+		fe.Backends = beSeq(bes...)
 		return &fe
 	}
+
+	// Each group index only resolves to a backend that is pinned to it via
+	// Backend.SourceRangeGroup (set here directly to isolate the reconciler's
+	// resolution logic from how the pin is derived from the Pod label).
+	group0, group1 := uint8(0), uint8(1)
+	pinnedBackend1 := baseBackend
+	pinnedBackend1.SourceRangeGroup = &group0
+	pinnedBackend2 := newTestBackend(backend2, loadbalancer.BackendStateActive)
+	pinnedBackend2.SourceRangeGroup = &group1
 
 	// The source range index algorithm is enabled by the annotation itself,
 	// independently of the global algorithm annotation option (which is off here).
 	fe := newNodePort([]loadbalancer.SourceRangeIndexEntry{
 		{Index: 0, Prefix: netip.MustParsePrefix("10.0.0.0/8")},
 		{Index: 1, Prefix: netip.MustParsePrefix("20.0.0.0/8"), Port: 5060},
-	})
+	}, pinnedBackend1, pinnedBackend2)
 	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, fe), "Update")
 
 	// The algorithm is applied to both the service and the nodeport frontend.
 	require.Equal(t, 2, countLines("LBALG=source-range-index"), "algorithm not applied to all frontends")
-	// Each frontend gets one entry per source range index group.
-	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 IDX=0"), "exact entry missing")
-	require.Equal(t, 2, countLines("CIDR=20.0.0.0/8:5060 IDX=1"), "port-restricted entry missing")
+	// Each frontend gets one entry per source range index group, resolved to
+	// the BackendID of whichever backend is pinned to that group.
+	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 BEID=1"), "exact entry missing")
+	require.Equal(t, 2, countLines("CIDR=20.0.0.0/8:5060 BEID=2"), "port-restricted entry missing")
 
 	// Prune must not delete entries that are part of the current set.
 	require.NoError(t, ops.Prune(context.TODO(), nil, nil), "Prune")
@@ -1575,6 +1585,221 @@ func TestBPFOpsSourceRangeIndexes(t *testing.T) {
 		require.NoError(t, ops.Delete(context.TODO(), nil, 0, del), "Delete")
 	}
 	require.Empty(t, dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false), "BPF maps not empty")
+}
+
+// TestBPFOpsSourceRangeIndexesUnresolved covers a source range index group
+// that no backend is currently pinned to: no map entry should be written for
+// it, and an existing entry must be pruned once its pinning backend is
+// unpinned (Backend.SourceRangeGroup cleared), mirroring how a pinned pod
+// losing its label -- or being deleted with no replacement labeled -- fails
+// closed instead of falling back to an arbitrary backend.
+func TestBPFOpsSourceRangeIndexesUnresolved(t *testing.T) {
+	lc := hivetest.Lifecycle(t)
+	log := hivetest.Logger(t)
+
+	maglevCfg, err := maglev.UserConfig{
+		TableSize: 1021,
+		HashSeed:  maglev.DefaultHashSeed,
+	}.ToConfig()
+	require.NoError(t, err, "ToConfig")
+	maglev := maglev.New(maglevCfg, lc)
+
+	extCfg := loadbalancer.ExternalConfig{
+		ZoneMapper:           &option.DaemonConfig{},
+		EnableIPv4:           true,
+		EnableIPv6:           true,
+		KubeProxyReplacement: true,
+		DefaultLBServiceIPAM: "lbipam",
+		EnableLBIPAM:         true,
+		EnableNodeIPAM:       false,
+	}
+
+	cfg, _ := loadbalancer.NewConfig(log, loadbalancer.DefaultUserConfig, loadbalancer.DeprecatedConfig{}, &option.DaemonConfig{})
+	cfg.AlgorithmAnnotation = false
+
+	lbmaps := maps.NewFakeLBMaps()
+
+	db := statedb.New()
+	nodeAddrs, err := tables.NewNodeAddressTable(db)
+	require.NoError(t, err)
+	wtxn := db.WriteTxn(nodeAddrs)
+	for _, n := range nodePortAddrs {
+		na := tables.NodeAddress{
+			Addr:       n,
+			NodePort:   true,
+			Primary:    true,
+			DeviceName: "lol0",
+		}
+		_, _, err := nodeAddrs.Insert(wtxn, na)
+		require.NoError(t, err)
+	}
+	wtxn.Commit()
+
+	ops := newBPFOps(bpfOpsParams{
+		Lifecycle:      lc,
+		Log:            log,
+		Config:         cfg,
+		ExternalConfig: extCfg,
+		LBMaps:         lbmaps,
+		Maglev:         maglev,
+		DB:             db,
+		NodeAddresses:  nodeAddrs,
+	})
+
+	beSeq := func(bes ...loadbalancer.Backend) loadbalancer.BackendsSeq2 {
+		return func(yield func(*loadbalancer.Backend, statedb.Revision) bool) {
+			for i := range bes {
+				bes[i].ServiceName = loadbalancer.ServiceName{}
+				if !yield(&bes[i], statedb.Revision(i+1)) {
+					return
+				}
+			}
+		}
+	}
+
+	countLines := func(substr string) int {
+		n := 0
+		for _, line := range dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false) {
+			if strings.Contains(line, substr) {
+				n++
+			}
+		}
+		return n
+	}
+
+	svc := baseService
+	svc.SourceRangeIndexes = []loadbalancer.SourceRangeIndexEntry{
+		{Index: 0, Prefix: netip.MustParsePrefix("10.0.0.0/8")},
+	}
+	fe := baseFrontend
+	fe.Type = NodePort
+	fe.Address = frontendAddrs[0]
+	fe.Service = &svc
+
+	// No backend claims group 0: the entry must not be written at all, not
+	// even to an arbitrary backend.
+	unpinned := newTestBackend(backend1, loadbalancer.BackendStateActive)
+	fe.Backends = beSeq(unpinned)
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &fe), "Update unresolved")
+	require.Equal(t, 0, countLines("SRCRANGEIDX:"), "unresolved group must not produce a map entry")
+
+	// Pinning the backend to group 0 makes the entry appear.
+	group0 := uint8(0)
+	pinned := unpinned
+	pinned.SourceRangeGroup = &group0
+	fe.Backends = beSeq(pinned)
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &fe), "Update pinned")
+	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 BEID=1"), "resolved entry missing")
+
+	// Unpinning it again (pod relabeled/replaced with no pin) must prune the
+	// now-stale entry rather than leaving it pointing at a backend that no
+	// longer claims the group.
+	fe.Backends = beSeq(unpinned)
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &fe), "Update unpinned again")
+	require.Equal(t, 0, countLines("SRCRANGEIDX:"), "stale entry not pruned after pin removed")
+}
+
+// TestBPFOpsSourceRangeIndexesConflict covers two backends pinned to the same
+// source range index group: exactly one entry is written, deterministically
+// resolved to the lower-address backend (matching sortedBackends' ordering).
+func TestBPFOpsSourceRangeIndexesConflict(t *testing.T) {
+	lc := hivetest.Lifecycle(t)
+	log := hivetest.Logger(t)
+
+	maglevCfg, err := maglev.UserConfig{
+		TableSize: 1021,
+		HashSeed:  maglev.DefaultHashSeed,
+	}.ToConfig()
+	require.NoError(t, err, "ToConfig")
+	maglev := maglev.New(maglevCfg, lc)
+
+	extCfg := loadbalancer.ExternalConfig{
+		ZoneMapper:           &option.DaemonConfig{},
+		EnableIPv4:           true,
+		EnableIPv6:           true,
+		KubeProxyReplacement: true,
+		DefaultLBServiceIPAM: "lbipam",
+		EnableLBIPAM:         true,
+		EnableNodeIPAM:       false,
+	}
+
+	cfg, _ := loadbalancer.NewConfig(log, loadbalancer.DefaultUserConfig, loadbalancer.DeprecatedConfig{}, &option.DaemonConfig{})
+	cfg.AlgorithmAnnotation = false
+
+	lbmaps := maps.NewFakeLBMaps()
+
+	db := statedb.New()
+	nodeAddrs, err := tables.NewNodeAddressTable(db)
+	require.NoError(t, err)
+	wtxn := db.WriteTxn(nodeAddrs)
+	for _, n := range nodePortAddrs {
+		na := tables.NodeAddress{
+			Addr:       n,
+			NodePort:   true,
+			Primary:    true,
+			DeviceName: "lol0",
+		}
+		_, _, err := nodeAddrs.Insert(wtxn, na)
+		require.NoError(t, err)
+	}
+	wtxn.Commit()
+
+	ops := newBPFOps(bpfOpsParams{
+		Lifecycle:      lc,
+		Log:            log,
+		Config:         cfg,
+		ExternalConfig: extCfg,
+		LBMaps:         lbmaps,
+		Maglev:         maglev,
+		DB:             db,
+		NodeAddresses:  nodeAddrs,
+	})
+
+	beSeq := func(bes ...loadbalancer.Backend) loadbalancer.BackendsSeq2 {
+		return func(yield func(*loadbalancer.Backend, statedb.Revision) bool) {
+			for i := range bes {
+				bes[i].ServiceName = loadbalancer.ServiceName{}
+				if !yield(&bes[i], statedb.Revision(i+1)) {
+					return
+				}
+			}
+		}
+	}
+
+	countLines := func(substr string) int {
+		n := 0
+		for _, line := range dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false) {
+			if strings.Contains(line, substr) {
+				n++
+			}
+		}
+		return n
+	}
+
+	group0 := uint8(0)
+	// backend1 (10.1.0.1) sorts before backend2 (10.1.0.2) in sortedBackends.
+	conflictBackend1 := newTestBackend(backend1, loadbalancer.BackendStateActive)
+	conflictBackend1.SourceRangeGroup = &group0
+	conflictBackend2 := newTestBackend(backend2, loadbalancer.BackendStateActive)
+	conflictBackend2.SourceRangeGroup = &group0
+
+	svc := baseService
+	svc.SourceRangeIndexes = []loadbalancer.SourceRangeIndexEntry{
+		{Index: 0, Prefix: netip.MustParsePrefix("10.0.0.0/8")},
+	}
+	fe := baseFrontend
+	fe.Type = NodePort
+	fe.Address = frontendAddrs[0]
+	fe.Service = &svc
+	fe.Backends = beSeq(conflictBackend1, conflictBackend2)
+
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &fe), "Update")
+
+	// Exactly one entry is written per (CIDR, frontend) pair, deterministically
+	// pinned to the lower-address backend. The conflict is also logged by
+	// updateFrontend (not asserted here; see the Warn call in the reconciler).
+	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 BEID=1"), "conflicting pin did not resolve to the lower-address backend")
+	require.Equal(t, 0, countLines("CIDR=10.0.0.0/8 BEID=2"), "conflicting pin unexpectedly used the higher-address backend")
 }
 
 // showMaps formats the map dumps as the Go code expected in the test cases.

@@ -420,10 +420,11 @@ func (s *Service6Value) SetSipInspect(enabled bool) {
 		s.SipInspect = 0
 	}
 }
+
 // GetTOS and SetTOS are no-ops for IPv6 services, as TOS pinning is
 // currently only supported on the IPv4 datapath.
-func (s *Service6Value) GetTOS() uint8    { return 0 }
-func (s *Service6Value) SetTOS(uint8)     {}
+func (s *Service6Value) GetTOS() uint8 { return 0 }
+func (s *Service6Value) SetTOS(uint8)  {}
 func (s *Service6Value) SetFlags(flags uint16) {
 	s.Flags = uint8(flags & 0xff)
 	s.Flags2 = uint8(flags >> 8)
@@ -1438,13 +1439,13 @@ func (k *SourceRangeIndexKey6) GetPort() uint16 {
 	return k.Sport
 }
 
-// SourceRangeIndexValue is the backend selection index for a matched client
+// SourceRangeIndexValue is the backend pinned to a matched client
 // source CIDR (and optionally client source port).
 type SourceRangeIndexValue struct {
-	Index uint8
+	BackendID uint32
 }
 
-func (v *SourceRangeIndexValue) String() string    { return fmt.Sprintf("%d", v.Index) }
+func (v *SourceRangeIndexValue) String() string    { return fmt.Sprintf("%d", v.BackendID) }
 func (v *SourceRangeIndexValue) New() bpf.MapValue { return &SourceRangeIndexValue{} }
 
 //

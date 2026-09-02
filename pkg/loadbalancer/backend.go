@@ -69,9 +69,14 @@ type Backend struct {
 	// This along with [ServiceName] and [Address] form the unique primary key ([BackendKey])
 	// for the backends table.
 	sourcePriority uint8
+
+	// SourceRangeGroup pins this backend to a ServiceSourceRangeIndex trunk
+	// group index, resolved from the backend pod's PodSourceRangeGroup label.
+	// nil if the pod does not carry the label.
+	SourceRangeGroup *uint8
 }
 
-const maxBackendSize = 140
+const maxBackendSize = 144
 
 // Assert on the size of [Backend] to keep changes to it at check.
 // If you're adding more fields to [Backend] and they're most of the time

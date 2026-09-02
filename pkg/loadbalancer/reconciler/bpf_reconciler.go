@@ -975,6 +975,7 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 	}
 
 	activeCount, terminatingCount, inactiveCount := 0, 0, 0
+	lbSrcRangeGroupPods := map[uint8]loadbalancer.BackendID{}
 
 	// Update backends that are new or changed.
 	slotID := 1
@@ -1072,6 +1073,21 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 		}
 
 		slotID++
+
+		if be.SourceRangeGroup != nil {
+			if existingID, ok := lbSrcRangeGroupPods[*be.SourceRangeGroup]; !ok {
+				lbSrcRangeGroupPods[*be.SourceRangeGroup] = beID
+			} else {
+				// Two backends pinned to the same group: keep whichever was
+				// seen first (orderedBackends is sorted by address, so this
+				// is deterministic) and surface the conflict instead of
+				// resolving it silently.
+				ops.log.Warn("Multiple backends pinned to the same source range index group, ignoring one",
+					logfields.Index, *be.SourceRangeGroup,
+					logfields.BackendID, existingID,
+					logfields.Address, be.Address)
+			}
+		}
 	}
 	backendCount := slotID - 1
 
@@ -1146,10 +1162,16 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 			continue
 		}
 
+		backendId, ok := lbSrcRangeGroupPods[entry.Index]
+
+		if !ok {
+			continue
+		}
+
 		key := sourceRangeIndexKey{entry.Prefix, entry.Port}
 		err := ops.LBMaps.UpdateSourceRangeIndex(
 			srcRangeIndexKey(entry.Prefix, entry.Port, uint16(feID), fe.Address.IsIPv6()),
-			&maps.SourceRangeIndexValue{Index: entry.Index},
+			&maps.SourceRangeIndexValue{BackendID: uint32(backendId)},
 		)
 		if err != nil {
 			return fmt.Errorf("update source range index: %w", err)

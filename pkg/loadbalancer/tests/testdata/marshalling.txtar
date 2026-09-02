@@ -101,7 +101,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRangeGroup": null
     }
   ],
   "HealthCheckBackends": [
@@ -118,7 +119,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRangeGroup": null
     }
   ],
   "ID": 1,
@@ -149,7 +151,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRangeGroup": null
     }
   ],
   "HealthCheckBackends": [
@@ -166,7 +169,8 @@ test/echo  [2002::2]:8080/TCP
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
-      "UnhealthyUpdatedAt": null
+      "UnhealthyUpdatedAt": null,
+      "SourceRangeGroup": null
     }
   ],
   "ID": 2,
@@ -186,7 +190,8 @@ test/echo  [2002::2]:8080/TCP
   "Source": "k8s",
   "State": 0,
   "Unhealthy": false,
-  "UnhealthyUpdatedAt": null
+  "UnhealthyUpdatedAt": null,
+  "SourceRangeGroup": null
 }
 {
   "ServiceName": "test/echo",
@@ -201,7 +206,8 @@ test/echo  [2002::2]:8080/TCP
   "Source": "k8s",
   "State": 0,
   "Unhealthy": false,
-  "UnhealthyUpdatedAt": null
+  "UnhealthyUpdatedAt": null,
+  "SourceRangeGroup": null
 }
 -- services-expected.yaml --
 name: test/echo
@@ -249,6 +255,7 @@ backends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourcerangegroup: null
 healthcheckbackends:
     - servicename: test/echo
       address: 10.244.1.1:8080/TCP
@@ -262,6 +269,7 @@ healthcheckbackends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourcerangegroup: null
 id: 1
 redirectto: null
 ---
@@ -288,6 +296,7 @@ backends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourcerangegroup: null
 healthcheckbackends:
     - servicename: test/echo
       address: '[2002::2]:8080/TCP'
@@ -301,6 +310,7 @@ healthcheckbackends:
       state: 0
       unhealthy: false
       unhealthyupdatedat: null
+      sourcerangegroup: null
 id: 2
 redirectto: null
 -- backends-expected.yaml --
@@ -316,6 +326,7 @@ source: k8s
 state: 0
 unhealthy: false
 unhealthyupdatedat: null
+sourcerangegroup: null
 ---
 servicename: test/echo
 address: '[2002::2]:8080/TCP'
@@ -329,6 +340,7 @@ source: k8s
 state: 0
 unhealthy: false
 unhealthyupdatedat: null
+sourcerangegroup: null
 -- service.yaml --
 apiVersion: v1
 kind: Service

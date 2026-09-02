@@ -138,9 +138,16 @@ const (
 	ServiceLoadBalancingAlgorithm = ServicePrefix + "/lb-algorithm"
 
 	// ServiceSourceRangeIndex maps client source CIDRs (optionally restricted to
-	// a client source port) to a deterministic backend selection index, computed
-	// as index % backend-count. See ParseSourceRangeIndexes for the value format.
+	// a client source port) to a trunk group index. A CIDR group's traffic is
+	// pinned to whichever backend pod carries a matching PodSourceRangeGroup
+	// label; if no backend claims that index, traffic matching the group is
+	// dropped. See ParseSourceRangeIndexes for the value format.
 	ServiceSourceRangeIndex = ServicePrefix + "/lb-source-range-index"
+
+	// PodSourceRangeGroup label pins a backend pod to a ServiceSourceRangeIndex
+	// source range group. The value is the decimal group index (0-255) from the owning
+	// Service's ServiceSourceRangeIndex annotation.
+	PodSourceRangeGroup = ServicePrefix + "/lb-source-range-group"
 
 	// ServiceSipInspect indicates that sip-inspect should take place.
 	ServiceSipInspect = ServicePrefix + "/sip-inspect"
