@@ -4,9 +4,7 @@
 package reflectors
 
 import (
-	"fmt"
 	"net/netip"
-	"strconv"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
@@ -23,11 +21,11 @@ import (
 
 // LbSrcRangeGroupPod is Cilium's internal model of the LB (by source range group) pods running on all nodes.
 type LbSrcRangeGroupPod struct {
-	UID        string
-	Namespace  string
-	Name       string
-	IP         netip.Addr
-	GroupIndex uint8
+	UID          string
+	Namespace    string
+	Name         string
+	IP           netip.Addr
+	SourceRanges string
 }
 
 func (p LbSrcRangeGroupPod) TableHeader() []string {
@@ -44,16 +42,12 @@ func (p LbSrcRangeGroupPod) TableRow() []string {
 		string(p.UID),
 		p.Namespace + "/" + p.Name,
 		p.IP.String(),
-		fmt.Sprintf("%d", p.GroupIndex),
+		p.SourceRanges,
 	}
 }
 
 const (
 	PodTableName = "lb-source-range-group-pods"
-
-	// PodSourceRangeGroup is the label used to pin a backend pod to a
-	// ServiceSourceRangeIndex trunk group. See [annotation.PodSourceRangeGroup].
-	PodSourceRangeGroup = annotation.PodSourceRangeGroup
 )
 
 func newNameIndex() statedb.Index[LbSrcRangeGroupPod, string] {
@@ -129,7 +123,7 @@ func podReflectorConfig(cs client.Clientset, pods statedb.RWTable[LbSrcRangeGrou
 	lw := utils.ListerWatcherWithModifiers(
 		utils.ListerWatcherFromTyped(cs.Slim().CoreV1().Pods("")),
 		func(opts *metav1.ListOptions) {
-			opts.LabelSelector = PodSourceRangeGroup
+			opts.LabelSelector = annotation.SourceAndPortRangeLbEnabled
 		})
 
 	return k8s.ReflectorConfig[LbSrcRangeGroupPod]{
@@ -143,11 +137,7 @@ func podReflectorConfig(cs client.Clientset, pods statedb.RWTable[LbSrcRangeGrou
 				return LbSrcRangeGroupPod{}, false
 			}
 
-			group, exist := pod.Labels[PodSourceRangeGroup]
-
-			if !exist {
-				return LbSrcRangeGroupPod{}, false
-			}
+			sourceRanges := pod.Annotations[annotation.PodSourceRanges]
 
 			ip, err := netip.ParseAddr(pod.Status.PodIP)
 
@@ -155,18 +145,12 @@ func podReflectorConfig(cs client.Clientset, pods statedb.RWTable[LbSrcRangeGrou
 				return LbSrcRangeGroupPod{}, false
 			}
 
-			groupIndex, err := strconv.ParseUint(group, 10, 8)
-
-			if err != nil {
-				return LbSrcRangeGroupPod{}, false
-			}
-
 			return LbSrcRangeGroupPod{
-				UID:        string(pod.UID),
-				Namespace:  pod.Namespace,
-				Name:       pod.Name,
-				IP:         ip,
-				GroupIndex: uint8(groupIndex),
+				UID:          string(pod.UID),
+				Namespace:    pod.Namespace,
+				Name:         pod.Name,
+				IP:           ip,
+				SourceRanges: sourceRanges,
 			}, true
 		},
 	}

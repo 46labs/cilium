@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -140,14 +141,16 @@ func convertService(cfg loadbalancer.Config, extCfg loadbalancer.ExternalConfig,
 		s.SourceRanges = append(s.SourceRanges, prefix)
 	}
 
-	if value, ok := annotation.Get(svc, annotation.ServiceSourceRangeIndex); ok {
-		if entries, err := loadbalancer.ParseSourceRangeIndexes(value); err != nil {
+	if value, ok := annotation.Get(svc, annotation.SourceAndPortRangeLbEnabled); ok {
+		enabled, err := strconv.ParseBool(value)
+
+		if err != nil {
 			log().Warn("Ignoring annotation",
 				logfields.Error, err,
-				logfields.Annotations, annotation.ServiceSourceRangeIndex,
+				logfields.Annotations, annotation.SourceAndPortRangeLbEnabled,
 			)
-		} else {
-			s.SourceRangeIndexes = entries
+		} else if enabled {
+			s.SourceAndPortRangeLbEnabled = enabled
 		}
 	}
 

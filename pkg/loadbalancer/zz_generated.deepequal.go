@@ -69,13 +69,6 @@ func (in *Backend) deepEqual(other *Backend) bool {
 	if in.sourcePriority != other.sourcePriority {
 		return false
 	}
-	if (in.SourceRangeGroup == nil) != (other.SourceRangeGroup == nil) {
-		return false
-	} else if in.SourceRangeGroup != nil {
-		if *in.SourceRangeGroup != *other.SourceRangeGroup {
-			return false
-		}
-	}
 
 	return true
 }

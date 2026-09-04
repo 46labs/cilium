@@ -6,6 +6,7 @@ package loadbalancer
 import (
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 	"unsafe"
 
@@ -70,13 +71,12 @@ type Backend struct {
 	// for the backends table.
 	sourcePriority uint8
 
-	// SourceRangeGroup pins this backend to a ServiceSourceRangeIndex trunk
-	// group index, resolved from the backend pod's PodSourceRangeGroup label.
-	// nil if the pod does not carry the label.
-	SourceRangeGroup *uint8
+	// List of source ranges pinned to the backend
+	// +deepequal-gen=false
+	SourceRanges []SourceAndPortRangeEntry
 }
 
-const maxBackendSize = 144
+const maxBackendSize = 160
 
 // Assert on the size of [Backend] to keep changes to it at check.
 // If you're adding more fields to [Backend] and they're most of the time
@@ -105,7 +105,8 @@ func (be *Backend) GetUnhealthyUpdatedAt() time.Time {
 
 func (be *Backend) DeepEqual(other *Backend) bool {
 	return be.deepEqual(other) &&
-		be.GetUnhealthyUpdatedAt().Equal(other.GetUnhealthyUpdatedAt())
+		be.GetUnhealthyUpdatedAt().Equal(other.GetUnhealthyUpdatedAt()) &&
+		slices.Equal(be.SourceRanges, other.SourceRanges)
 }
 
 func (be *Backend) SourcePriority() uint8 {

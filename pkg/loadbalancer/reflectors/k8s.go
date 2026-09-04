@@ -223,7 +223,13 @@ func (p *reflectorParams) updateBackendsWithSourceRangeGroup(backend *loadbalanc
 	pod, _, found := p.LbSrcRangeGroupPods.Get(txn, PodByIp(backend.Address.Addr()))
 
 	if found {
-		backend.SourceRangeGroup = &pod.GroupIndex
+		if entries, err := loadbalancer.ParseSourceRangeIndexes(pod.SourceRanges); err != nil {
+			p.Log.Warn("backend source ranges parsing",
+				logfields.Error, err,
+			)
+		} else {
+			backend.SourceRanges = entries
+		}
 	}
 }
 
