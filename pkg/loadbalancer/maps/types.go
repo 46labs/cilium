@@ -420,10 +420,11 @@ func (s *Service6Value) SetSipInspect(enabled bool) {
 		s.SipInspect = 0
 	}
 }
+
 // GetTOS and SetTOS are no-ops for IPv6 services, as TOS pinning is
 // currently only supported on the IPv4 datapath.
-func (s *Service6Value) GetTOS() uint8    { return 0 }
-func (s *Service6Value) SetTOS(uint8)     {}
+func (s *Service6Value) GetTOS() uint8 { return 0 }
+func (s *Service6Value) SetTOS(uint8)  {}
 func (s *Service6Value) SetFlags(flags uint16) {
 	s.Flags = uint8(flags & 0xff)
 	s.Flags2 = uint8(flags >> 8)
@@ -1304,8 +1305,8 @@ func (v *SourceRangeValue) New() bpf.MapValue { return &SourceRangeValue{} }
 //
 
 const (
-	SourceRangeIndex4MapName = "cilium_lb4_src_range_idx"
-	SourceRangeIndex6MapName = "cilium_lb6_src_range_idx"
+	SourceAndPortRange4MapName = "cilium_lb4_src_range_idx"
+	SourceAndPortRange6MapName = "cilium_lb6_src_range_idx"
 
 	// The client source port precedes the address such that a single LPM
 	// prefix covers the rev_nat_id, the client source port and the CIDR
@@ -1316,7 +1317,7 @@ const (
 	lpmPrefixLen6SrcRangeIdx = 16 + 16
 )
 
-type SourceRangeIndexKey interface {
+type SourceAndPortRangeKey interface {
 	bpf.MapKey
 
 	GetCIDR() *cidr.CIDR
@@ -1326,34 +1327,34 @@ type SourceRangeIndexKey interface {
 	GetPort() uint16
 
 	// Convert fields to network byte order.
-	ToNetwork() SourceRangeIndexKey
+	ToNetwork() SourceAndPortRangeKey
 
 	// ToHost converts fields to host byte order.
-	ToHost() SourceRangeIndexKey
+	ToHost() SourceAndPortRangeKey
 }
 
 // The compile-time check for whether the structs implement the interface
-var _ SourceRangeIndexKey = (*SourceRangeIndexKey4)(nil)
-var _ SourceRangeIndexKey = (*SourceRangeIndexKey6)(nil)
+var _ SourceAndPortRangeKey = (*SourceAndPortRangeKey4)(nil)
+var _ SourceAndPortRangeKey = (*SourceAndPortRangeKey6)(nil)
 
-type SourceRangeIndexKey4 struct {
+type SourceAndPortRangeKey4 struct {
 	PrefixLen uint32     `align:"lpm_key"`
 	RevNATID  uint16     `align:"rev_nat_id"`
 	Sport     uint16     `align:"sport"`
 	Address   types.IPv4 `align:"addr"`
 }
 
-func (k *SourceRangeIndexKey4) String() string {
-	kHost := k.ToHost().(*SourceRangeIndexKey4)
+func (k *SourceAndPortRangeKey4) String() string {
+	kHost := k.ToHost().(*SourceAndPortRangeKey4)
 	if kHost.Sport != 0 {
 		return fmt.Sprintf("%s:%d (%d)", kHost.GetCIDR().String(), kHost.Sport, kHost.GetRevNATID())
 	}
 	return fmt.Sprintf("%s (%d)", kHost.GetCIDR().String(), kHost.GetRevNATID())
 }
 
-func (k *SourceRangeIndexKey4) New() bpf.MapKey { return &SourceRangeIndexKey4{} }
+func (k *SourceAndPortRangeKey4) New() bpf.MapKey { return &SourceAndPortRangeKey4{} }
 
-func (k *SourceRangeIndexKey4) ToNetwork() SourceRangeIndexKey {
+func (k *SourceAndPortRangeKey4) ToNetwork() SourceAndPortRangeKey {
 	n := *k
 	n.RevNATID = byteorder.HostToNetwork16(n.RevNATID)
 	n.Sport = byteorder.HostToNetwork16(n.Sport)
@@ -1361,14 +1362,14 @@ func (k *SourceRangeIndexKey4) ToNetwork() SourceRangeIndexKey {
 }
 
 // ToHost returns the key in the host byte order
-func (k *SourceRangeIndexKey4) ToHost() SourceRangeIndexKey {
+func (k *SourceAndPortRangeKey4) ToHost() SourceAndPortRangeKey {
 	h := *k
 	h.RevNATID = byteorder.NetworkToHost16(h.RevNATID)
 	h.Sport = byteorder.NetworkToHost16(h.Sport)
 	return &h
 }
 
-func (k *SourceRangeIndexKey4) GetCIDR() *cidr.CIDR {
+func (k *SourceAndPortRangeKey4) GetCIDR() *cidr.CIDR {
 	var (
 		c  net.IPNet
 		ip types.IPv4
@@ -1379,32 +1380,32 @@ func (k *SourceRangeIndexKey4) GetCIDR() *cidr.CIDR {
 	return cidr.NewCIDR(&c)
 }
 
-func (k *SourceRangeIndexKey4) GetRevNATID() loadbalancer.ServiceID {
+func (k *SourceAndPortRangeKey4) GetRevNATID() loadbalancer.ServiceID {
 	return loadbalancer.ServiceID(k.RevNATID)
 }
 
-func (k *SourceRangeIndexKey4) GetPort() uint16 {
+func (k *SourceAndPortRangeKey4) GetPort() uint16 {
 	return k.Sport
 }
 
-type SourceRangeIndexKey6 struct {
+type SourceAndPortRangeKey6 struct {
 	PrefixLen uint32     `align:"lpm_key"`
 	RevNATID  uint16     `align:"rev_nat_id"`
 	Sport     uint16     `align:"sport"`
 	Address   types.IPv6 `align:"addr"`
 }
 
-func (k *SourceRangeIndexKey6) String() string {
-	kHost := k.ToHost().(*SourceRangeIndexKey6)
+func (k *SourceAndPortRangeKey6) String() string {
+	kHost := k.ToHost().(*SourceAndPortRangeKey6)
 	if kHost.Sport != 0 {
 		return fmt.Sprintf("%s:%d (%d)", kHost.GetCIDR().String(), kHost.Sport, kHost.GetRevNATID())
 	}
 	return fmt.Sprintf("%s (%d)", kHost.GetCIDR().String(), kHost.GetRevNATID())
 }
 
-func (k *SourceRangeIndexKey6) New() bpf.MapKey { return &SourceRangeIndexKey6{} }
+func (k *SourceAndPortRangeKey6) New() bpf.MapKey { return &SourceAndPortRangeKey6{} }
 
-func (k *SourceRangeIndexKey6) ToNetwork() SourceRangeIndexKey {
+func (k *SourceAndPortRangeKey6) ToNetwork() SourceAndPortRangeKey {
 	n := *k
 	n.RevNATID = byteorder.HostToNetwork16(n.RevNATID)
 	n.Sport = byteorder.HostToNetwork16(n.Sport)
@@ -1412,14 +1413,14 @@ func (k *SourceRangeIndexKey6) ToNetwork() SourceRangeIndexKey {
 }
 
 // ToHost returns the key in the host byte order
-func (k *SourceRangeIndexKey6) ToHost() SourceRangeIndexKey {
+func (k *SourceAndPortRangeKey6) ToHost() SourceAndPortRangeKey {
 	h := *k
 	h.RevNATID = byteorder.NetworkToHost16(h.RevNATID)
 	h.Sport = byteorder.NetworkToHost16(h.Sport)
 	return &h
 }
 
-func (k *SourceRangeIndexKey6) GetCIDR() *cidr.CIDR {
+func (k *SourceAndPortRangeKey6) GetCIDR() *cidr.CIDR {
 	var (
 		c  net.IPNet
 		ip types.IPv6
@@ -1430,22 +1431,22 @@ func (k *SourceRangeIndexKey6) GetCIDR() *cidr.CIDR {
 	return cidr.NewCIDR(&c)
 }
 
-func (k *SourceRangeIndexKey6) GetRevNATID() loadbalancer.ServiceID {
+func (k *SourceAndPortRangeKey6) GetRevNATID() loadbalancer.ServiceID {
 	return loadbalancer.ServiceID(k.RevNATID)
 }
 
-func (k *SourceRangeIndexKey6) GetPort() uint16 {
+func (k *SourceAndPortRangeKey6) GetPort() uint16 {
 	return k.Sport
 }
 
-// SourceRangeIndexValue is the backend selection index for a matched client
+// SourceAndPortRangeValue is the backend pinned to a matched client
 // source CIDR (and optionally client source port).
-type SourceRangeIndexValue struct {
-	Index uint8
+type SourceAndPortRangeValue struct {
+	BackendID uint32
 }
 
-func (v *SourceRangeIndexValue) String() string    { return fmt.Sprintf("%d", v.Index) }
-func (v *SourceRangeIndexValue) New() bpf.MapValue { return &SourceRangeIndexValue{} }
+func (v *SourceAndPortRangeValue) String() string    { return fmt.Sprintf("%d", v.BackendID) }
+func (v *SourceAndPortRangeValue) New() bpf.MapValue { return &SourceAndPortRangeValue{} }
 
 //
 // Health probes

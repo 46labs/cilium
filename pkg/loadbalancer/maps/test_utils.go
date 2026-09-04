@@ -150,17 +150,17 @@ func DumpLBMaps(lbmaps LBMaps, sanitizeIDs bool, customizeAddr func(types.AddrCl
 		panic(err)
 	}
 
-	srcRangeIdxCB := func(key SourceRangeIndexKey, value *SourceRangeIndexValue) {
+	srcRangeIdxCB := func(key SourceAndPortRangeKey, value *SourceAndPortRangeValue) {
 		key = key.ToHost()
 		portS := ""
 		if key.GetPort() != 0 {
 			portS = fmt.Sprintf(":%d", key.GetPort())
 		}
-		out = append(out, fmt.Sprintf("SRCRANGEIDX: ID=%s CIDR=%s%s IDX=%d",
+		out = append(out, fmt.Sprintf("SRCRANGEIDX: ID=%s CIDR=%s%s BEID=%d",
 			sanitizeID(key.GetRevNATID(), sanitizeIDs),
 			key.GetCIDR(),
 			portS,
-			value.Index,
+			value.BackendID,
 		))
 	}
 	if err := lbmaps.DumpSourceRangeIndex(srcRangeIdxCB); err != nil {

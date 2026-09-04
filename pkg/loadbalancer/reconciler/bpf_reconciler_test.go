@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/cilium/hive/hivetest"
+	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/reconciler"
 	"github.com/stretchr/testify/require"
@@ -1222,6 +1223,14 @@ var perServiceAlgorithmCases = []setWithAlgo{
 	},
 }
 
+type fakeGroup struct{}
+
+func (fakeGroup) Add(...job.Job) {}
+
+func (fakeGroup) Scoped(name string) job.ScopedGroup {
+	return nil
+}
+
 func TestBPFOps(t *testing.T) {
 	lc := hivetest.Lifecycle(t)
 	log := hivetest.Logger(t)
@@ -1417,6 +1426,7 @@ func TestBPFOps(t *testing.T) {
 					Maglev:         maglev,
 					DB:             db,
 					NodeAddresses:  nodeAddrs,
+					Group:          fakeGroup{},
 				}
 
 				ops := newBPFOps(p)
@@ -1443,6 +1453,7 @@ func TestBPFOps(t *testing.T) {
 				Maglev:         maglev,
 				DB:             db,
 				NodeAddresses:  nodeAddrs,
+				Group:          fakeGroup{},
 			}
 			ops := newBPFOps(p)
 			runTests(ops, setWithAlgo.testCaseSet, setWithAlgo.algo, addr, true)
@@ -1450,7 +1461,12 @@ func TestBPFOps(t *testing.T) {
 	}
 }
 
-func TestBPFOpsSourceRangeIndexes(t *testing.T) {
+// TestBPFOpsSourceRanges covers Backend.SourceRanges: each backend carries
+// its own list of client source CIDR[:port] entries (resolved from the
+// backend pod's PodSourceRanges annotation elsewhere), and updateFrontend
+// writes one source-range-index map entry per entry, pointing at that
+// backend's ID.
+func TestBPFOpsSourceRanges(t *testing.T) {
 	lc := hivetest.Lifecycle(t)
 	log := hivetest.Logger(t)
 
@@ -1501,6 +1517,7 @@ func TestBPFOpsSourceRangeIndexes(t *testing.T) {
 		Maglev:         maglev,
 		DB:             db,
 		NodeAddresses:  nodeAddrs,
+		Group:          fakeGroup{},
 	})
 
 	beSeq := func(bes ...loadbalancer.Backend) loadbalancer.BackendsSeq2 {
@@ -1524,45 +1541,64 @@ func TestBPFOpsSourceRangeIndexes(t *testing.T) {
 		return n
 	}
 
-	newNodePort := func(srcIndexes []loadbalancer.SourceRangeIndexEntry) *loadbalancer.Frontend {
+	newNodePort := func(bes ...loadbalancer.Backend) *loadbalancer.Frontend {
 		svc := baseService
-		svc.SourceRangeIndexes = srcIndexes
+		svc.SourceAndPortRangeLbEnabled = true
 		fe := baseFrontend
 		fe.Type = NodePort
 		fe.Address = frontendAddrs[0]
 		fe.Service = &svc
-		fe.Backends = beSeq(baseBackend, newTestBackend(backend2, loadbalancer.BackendStateActive))
+		fe.Backends = beSeq(bes...)
 		return &fe
 	}
 
-	// The source range index algorithm is enabled by the annotation itself,
+	// A backend without any SourceRanges must not produce a map entry, even
+	// though the service has the algorithm enabled.
+	unrangedFe := newNodePort(baseBackend, newTestBackend(backend2, loadbalancer.BackendStateActive))
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, unrangedFe), "Update without ranges")
+	require.Equal(t, 0, countLines("SRCRANGEIDX:"), "backend without SourceRanges must not produce an entry")
+
+	// Each backend carries its own list of client source CIDR[:port] entries
+	// (set here directly to isolate the reconciler's handling of
+	// Backend.SourceRanges from how it's derived from the Pod annotation).
+	rangedBackend1 := baseBackend
+	rangedBackend1.SourceRanges = []loadbalancer.SourceAndPortRangeEntry{
+		{Prefix: netip.MustParsePrefix("10.0.0.0/8")},
+	}
+	rangedBackend2 := newTestBackend(backend2, loadbalancer.BackendStateActive)
+	rangedBackend2.SourceRanges = []loadbalancer.SourceAndPortRangeEntry{
+		{Prefix: netip.MustParsePrefix("20.0.0.0/8"), Port: 5060},
+	}
+
+	// The source/port range algorithm is enabled by the annotation itself,
 	// independently of the global algorithm annotation option (which is off here).
-	fe := newNodePort([]loadbalancer.SourceRangeIndexEntry{
-		{Index: 0, Prefix: netip.MustParsePrefix("10.0.0.0/8")},
-		{Index: 1, Prefix: netip.MustParsePrefix("20.0.0.0/8"), Port: 5060},
-	})
+	fe := newNodePort(rangedBackend1, rangedBackend2)
 	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, fe), "Update")
 
 	// The algorithm is applied to both the service and the nodeport frontend.
 	require.Equal(t, 2, countLines("LBALG=source-range-index"), "algorithm not applied to all frontends")
-	// Each frontend gets one entry per source range index group.
-	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 IDX=0"), "exact entry missing")
-	require.Equal(t, 2, countLines("CIDR=20.0.0.0/8:5060 IDX=1"), "port-restricted entry missing")
+	// Each frontend gets one entry per backend's declared CIDR[:port], resolved
+	// to that backend's ID.
+	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 BEID=1"), "exact entry missing")
+	require.Equal(t, 2, countLines("CIDR=20.0.0.0/8:5060 BEID=2"), "port-restricted entry missing")
 
 	// Prune must not delete entries that are part of the current set.
 	require.NoError(t, ops.Prune(context.TODO(), nil, nil), "Prune")
 	require.Equal(t, 4, countLines("SRCRANGEIDX:"), "Prune removed current entries")
 
-	// Dropping the annotation removes the entries via orphan cleanup.
-	fe.Service.SourceRangeIndexes = nil
-	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, fe), "Update without indexes")
-	require.Equal(t, 0, countLines("SRCRANGEIDX:"), "orphan source range indexes not cleaned up")
+	// Backends losing their SourceRanges (e.g. the pod's annotation removed)
+	// removes the entries via orphan cleanup. Note that unlike map entries,
+	// the algorithm itself stays selected as long as
+	// Service.SourceAndPortRangeLbEnabled is set -- it does not depend on
+	// whether any backend currently has entries.
+	fe.Backends = beSeq(baseBackend, newTestBackend(backend2, loadbalancer.BackendStateActive))
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, fe), "Update without ranges")
+	require.Equal(t, 0, countLines("SRCRANGEIDX:"), "orphan source ranges not cleaned up")
+	require.NoError(t, ops.Delete(context.TODO(), nil, 0, fe), "Delete")
 
 	// ClusterIP frontends are excluded from the source range index algorithm.
 	svc := baseService
-	svc.SourceRangeIndexes = []loadbalancer.SourceRangeIndexEntry{
-		{Index: 0, Prefix: netip.MustParsePrefix("10.0.0.0/8")},
-	}
+	svc.SourceAndPortRangeLbEnabled = true
 	feCluster := baseFrontend
 	feCluster.Type = ClusterIP
 	feCluster.Address = extraFrontend
@@ -1571,10 +1607,129 @@ func TestBPFOpsSourceRangeIndexes(t *testing.T) {
 	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &feCluster), "Update ClusterIP")
 	require.Equal(t, 0, countLines("LBALG=source-range-index"), "ClusterIP frontend must not use the algorithm")
 
-	for _, del := range []*loadbalancer.Frontend{fe, &feCluster} {
-		require.NoError(t, ops.Delete(context.TODO(), nil, 0, del), "Delete")
-	}
+	require.NoError(t, ops.Delete(context.TODO(), nil, 0, &feCluster), "Delete")
 	require.Empty(t, dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false), "BPF maps not empty")
+}
+
+// Note: the old group-index model had a dedicated "unresolved group" test
+// here (a service-level index that no backend claimed). That concept no
+// longer exists: there's no separate declaration step to resolve against --
+// a backend either carries its own SourceRanges or it doesn't -- so the
+// "backend without SourceRanges produces no entry" and "removing a backend's
+// SourceRanges prunes its entry" cases are now covered directly by
+// TestBPFOpsSourceRanges above.
+
+// TestBPFOpsSourceRangesConflict covers two backends that both declare the
+// same client source CIDR[:port] entry for the same frontend.
+//
+// Unlike the old group-index model -- which pinned at most one backend per
+// group and logged a warning on conflict -- there is no conflict detection
+// in the per-backend-entries model: the BPF source-range-index map key is
+// (CIDR, port, frontend ID) only, so whichever backend updateFrontend
+// processes *last* for a given key silently overwrites the entry written by
+// any earlier backend with the same entry. This test pins down that current
+// (unguarded) behavior; see the reconciler review notes for whether a
+// conflict warning should be reintroduced.
+func TestBPFOpsSourceRangesConflict(t *testing.T) {
+	lc := hivetest.Lifecycle(t)
+	log := hivetest.Logger(t)
+
+	maglevCfg, err := maglev.UserConfig{
+		TableSize: 1021,
+		HashSeed:  maglev.DefaultHashSeed,
+	}.ToConfig()
+	require.NoError(t, err, "ToConfig")
+	maglev := maglev.New(maglevCfg, lc)
+
+	extCfg := loadbalancer.ExternalConfig{
+		ZoneMapper:           &option.DaemonConfig{},
+		EnableIPv4:           true,
+		EnableIPv6:           true,
+		KubeProxyReplacement: true,
+		DefaultLBServiceIPAM: "lbipam",
+		EnableLBIPAM:         true,
+		EnableNodeIPAM:       false,
+	}
+
+	cfg, _ := loadbalancer.NewConfig(log, loadbalancer.DefaultUserConfig, loadbalancer.DeprecatedConfig{}, &option.DaemonConfig{})
+	cfg.AlgorithmAnnotation = false
+
+	lbmaps := maps.NewFakeLBMaps()
+
+	db := statedb.New()
+	nodeAddrs, err := tables.NewNodeAddressTable(db)
+	require.NoError(t, err)
+	wtxn := db.WriteTxn(nodeAddrs)
+	for _, n := range nodePortAddrs {
+		na := tables.NodeAddress{
+			Addr:       n,
+			NodePort:   true,
+			Primary:    true,
+			DeviceName: "lol0",
+		}
+		_, _, err := nodeAddrs.Insert(wtxn, na)
+		require.NoError(t, err)
+	}
+	wtxn.Commit()
+
+	ops := newBPFOps(bpfOpsParams{
+		Lifecycle:      lc,
+		Log:            log,
+		Config:         cfg,
+		ExternalConfig: extCfg,
+		LBMaps:         lbmaps,
+		Maglev:         maglev,
+		DB:             db,
+		NodeAddresses:  nodeAddrs,
+		Group:          fakeGroup{},
+	})
+
+	beSeq := func(bes ...loadbalancer.Backend) loadbalancer.BackendsSeq2 {
+		return func(yield func(*loadbalancer.Backend, statedb.Revision) bool) {
+			for i := range bes {
+				bes[i].ServiceName = loadbalancer.ServiceName{}
+				if !yield(&bes[i], statedb.Revision(i+1)) {
+					return
+				}
+			}
+		}
+	}
+
+	countLines := func(substr string) int {
+		n := 0
+		for _, line := range dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false) {
+			if strings.Contains(line, substr) {
+				n++
+			}
+		}
+		return n
+	}
+
+	entries := []loadbalancer.SourceAndPortRangeEntry{
+		{Prefix: netip.MustParsePrefix("10.0.0.0/8")},
+	}
+	// backend1 (10.1.0.1) sorts before backend2 (10.1.0.2) in sortedBackends,
+	// so backend2 is processed last and wins the shared map key.
+	conflictBackend1 := newTestBackend(backend1, loadbalancer.BackendStateActive)
+	conflictBackend1.SourceRanges = entries
+	conflictBackend2 := newTestBackend(backend2, loadbalancer.BackendStateActive)
+	conflictBackend2.SourceRanges = entries
+
+	svc := baseService
+	svc.SourceAndPortRangeLbEnabled = true
+	fe := baseFrontend
+	fe.Type = NodePort
+	fe.Address = frontendAddrs[0]
+	fe.Service = &svc
+	fe.Backends = beSeq(conflictBackend1, conflictBackend2)
+
+	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &fe), "Update")
+
+	// Exactly one entry exists per (CIDR, frontend) pair -- the map key does
+	// not include the backend ID -- and it ends up pointing at whichever
+	// backend updateFrontend processed last for that key.
+	require.Equal(t, 0, countLines("CIDR=10.0.0.0/8 BEID=1"), "expected the first-processed backend to be overwritten")
+	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 BEID=2"), "expected the last-processed backend to win the shared entry")
 }
 
 // showMaps formats the map dumps as the Go code expected in the test cases.

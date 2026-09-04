@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -140,14 +141,16 @@ func convertService(cfg loadbalancer.Config, extCfg loadbalancer.ExternalConfig,
 		s.SourceRanges = append(s.SourceRanges, prefix)
 	}
 
-	if value, ok := annotation.Get(svc, annotation.ServiceSourceRangeIndex); ok {
-		if entries, err := loadbalancer.ParseSourceRangeIndexes(value); err != nil {
+	if value, ok := annotation.Get(svc, annotation.SourceAndPortRangeLbEnabled); ok {
+		enabled, err := strconv.ParseBool(value)
+
+		if err != nil {
 			log().Warn("Ignoring annotation",
 				logfields.Error, err,
-				logfields.Annotations, annotation.ServiceSourceRangeIndex,
+				logfields.Annotations, annotation.SourceAndPortRangeLbEnabled,
 			)
-		} else {
-			s.SourceRangeIndexes = entries
+		} else if enabled {
+			s.SourceAndPortRangeLbEnabled = enabled
 		}
 	}
 
@@ -405,7 +408,13 @@ func getIPFamilies(svc *slim_corev1.Service) []slim_corev1.IPFamily {
 	return svc.Spec.IPFamilies
 }
 
-func convertEndpoints(rawlog *slog.Logger, cfg loadbalancer.ExternalConfig, svcName loadbalancer.ServiceName, bes iter.Seq2[cmtypes.AddrCluster, *k8s.Backend]) iter.Seq[loadbalancer.Backend] {
+func convertEndpoints(
+	rawlog *slog.Logger,
+	cfg loadbalancer.ExternalConfig,
+	svcName loadbalancer.ServiceName,
+	bes iter.Seq2[cmtypes.AddrCluster, *k8s.Backend],
+	transformBackend func(*loadbalancer.Backend),
+) iter.Seq[loadbalancer.Backend] {
 	return func(yield func(be loadbalancer.Backend) bool) {
 		// Lazily construct the augmented logger as we very rarely log here.
 		log := sync.OnceValue(func() *slog.Logger {
@@ -485,6 +494,7 @@ func convertEndpoints(rawlog *slog.Logger, cfg loadbalancer.ExternalConfig, svcN
 						ForZones: be.HintsForZones,
 					}
 				}
+				transformBackend(&bep)
 				if !yield(bep) {
 					break
 				}
