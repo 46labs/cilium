@@ -27,6 +27,10 @@
 
 #define SIP_CALL_ID		"a84b4c76e66710@pc33.atlanta.com"
 #define SIP_CALL_ID_HASH	0xb93dd48c
+#define SIP_LONG_CALL_ID \
+	"87cbb257-0123456789abcdefghijklmnopqrstuvwxyz" \
+	"ABCDEFGHIJKLMNOPQRSTU"
+#define SIP_LONG_CALL_ID_HASH 0x5eafea30
 
 #define sip_register                              \
 	"REGISTER sip:bob@biloxi.com SIP/2.0\r\n" \
@@ -64,22 +68,21 @@
 	"\r\n"
 
 #define sip_invite                              \
-	"INVITE sip:bob@biloxi.com SIP/2.0\r\n" \
-	"Call-ID: " SIP_CALL_ID "\r\n"          \
-	"CSeq: 314159 INVITE\r\n"               \
-	"Content-Length: 0\r\n"                 \
+	"INVITE sip:x SIP/2.0\r\n"               \
+	"i:" SIP_LONG_CALL_ID "\r\n"            \
+	"CSeq: 1 INVITE\r\n"                    \
 	"\r\n"
 
 #define sip_cancel                              \
 	"CANCEL sip:bob@biloxi.com SIP/2.0\r\n" \
-	"Call-ID: " SIP_CALL_ID "\r\n"          \
+	"i: " SIP_CALL_ID "\r\n"                \
 	"CSeq: 314159 INVITE\r\n"               \
 	"Content-Length: 0\r\n"                 \
 	"\r\n"
 
 #define sip_update                              \
 	"UPDATE sip:bob@biloxi.com SIP/2.0\r\n" \
-	"Call-ID: " SIP_CALL_ID "\r\n"          \
+	"Call-ID:" SIP_CALL_ID "\r\n"           \
 	"CSeq: 314159 INVITE\r\n"               \
 	"Content-Length: 0\r\n"                 \
 	"\r\n"
@@ -448,9 +451,9 @@ int bpf_invite_test(__maybe_unused struct __ctx_buff *ctx)
 	test_init();
 
 	__u32 got = sip_inspect(ctx);
-	if (got != SIP_CALL_ID_HASH)
+	if (got != SIP_LONG_CALL_ID_HASH)
 		test_fatal("hash mismatch: got=%lx expected=%lx", got,
-			   SIP_CALL_ID_HASH);
+			   SIP_LONG_CALL_ID_HASH);
 
 	test_finish();
 }

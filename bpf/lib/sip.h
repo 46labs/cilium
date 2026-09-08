@@ -95,8 +95,7 @@ static inline __u8 is_sip(const char *cur, const char *data_end)
 __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 {
 	static const __u64 call_id1 = 0x3a64692d6c6c6163ULL; // "call-id:"
-	static const __u8 call_id2 = ' ';
-	static const __u16 crlf = 0x0a0d;
+	static const __u32 compact_call_id = 0x3a690a0d; // "\r\ni:"
 
 	void *data, *data_end;
 	struct ethhdr *eth = NULL;
@@ -104,6 +103,7 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 	__u32 hash = 0x811c9dc5;
 	__u32 fnv_prime = 0x01000193;
 	__u64 method[2] = {};
+	__u8 call_id[68];
 	__u32 pull_len;
 
 	data = (void *)(long)ctx->data;
@@ -161,17 +161,16 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 	}
 
 	int found = 0;
+	cur += 7;
 
 	for (int i = 0; i < 1000; i++) {
-		if (cur + 9 > data_end)
+		if (cur + 1 > data_end)
 			break;
 
-		__u64 v = *(__u64 *)cur;
-		__u8 c = *(__u8 *)(cur + 8);
+		__u64 v = *(__u64 *)(cur - 7);
 
-		v |= 0x0020200020202020ULL;
-
-		if (v == call_id1 && c == call_id2) {
+		if ((v | 0x0020200020202020ULL) == call_id1 ||
+		    ((__u32)(v >> 32) | 0x00200000) == compact_call_id) {
 			found = 1;
 			break;
 		}
@@ -181,31 +180,41 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 
 	if (!found)
 		return NOT_FOUND;
+	cur++;
 
-	if (cur + 9 > data_end)
+	if (ctx_load_bytes(ctx, (__u32)((char *)cur - (char *)data), call_id,
+			   sizeof(call_id)) < 0)
 		return NOT_FOUND;
+	cur = call_id;
 
-	cur += 9;
+	/* Skip one optional whitespace byte without making cur variable-offset. */
+	__u8 first = *(__u8 *)cur;
+	__u8 has_lws = first == ' ' || first == '\t';
+	if (!has_lws) {
+		if (*(__u8 *)cur == '\r' && *(__u8 *)(cur + 1) == '\n')
+			return hash;
 
-	found = 0;
-	if (cur + 68 > data_end)
-		return NOT_FOUND;
+		hash ^= first;
+		hash *= fnv_prime;
+	}
+	cur++;
 
+	/* Long Call-IDs keep affinity based on the first 64 bytes. */
 #pragma unroll
-	for (int i = 0; i < 64; i++) {
-		__u16 v = *(__u16 *)(cur + i);
-
-		if (v == crlf) {
-			found = 1;
-			break;
-		}
+	for (int i = 0; i < 63; i++) {
+		if (*(__u8 *)(cur + i) == '\r' &&
+		    *(__u8 *)(cur + i + 1) == '\n')
+			return hash;
 
 		hash ^= *(unsigned char *)(cur + i);
 		hash *= fnv_prime;
 	}
 
-	if (!found)
-		return NOT_FOUND;
+	if (has_lws && !(*(__u8 *)(cur + 63) == '\r' &&
+			 *(__u8 *)(cur + 64) == '\n')) {
+		hash ^= *(unsigned char *)(cur + 63);
+		hash *= fnv_prime;
+	}
 
 	return hash;
 }
