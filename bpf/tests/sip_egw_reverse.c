@@ -76,7 +76,7 @@ mock_redirect_neigh(int ifindex __maybe_unused,
 
 #define fib_lookup mock_fib_lookup
 static __always_inline __maybe_unused long
-mock_fib_lookup(void *ctx __maybe_unused, struct bpf_fib_lookup *params,
+mock_fib_lookup(void *ctx __maybe_unused, const struct bpf_fib_lookup *params,
 		int plen __maybe_unused, __u32 flags __maybe_unused)
 {
 	return params ? BPF_FIB_LKUP_RET_SUCCESS : BPF_FIB_LKUP_RET_BLACKHOLE;

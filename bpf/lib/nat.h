@@ -950,10 +950,13 @@ __snat_v4_nat(struct __ctx_buff *ctx, struct ipv4_ct_tuple *tuple,
 	int ret;
 
 	if (!state) {
-		ret = snat_v4_nat_handle_mapping(ctx, tuple, fraginfo, &state, &tmp,
+		struct ipv4_nat_entry *mapped_state = NULL;
+
+		ret = snat_v4_nat_handle_mapping(ctx, tuple, fraginfo, &mapped_state, &tmp,
 						 l4_off, target, trace, ext_err);
 		if (ret < 0)
 			return ret;
+		state = mapped_state;
 
 		/* ICMP error message passes valid state, retains
 		 * old_port == new_port == 0, and thus skips port rewrite.
@@ -2026,10 +2029,13 @@ ___snat_v6_nat(struct __ctx_buff *ctx, struct ipv6_ct_tuple *tuple,
 	int ret;
 
 	if (!state) {
-		ret = snat_v6_nat_handle_mapping(ctx, tuple, fraginfo, &state,
+		struct ipv6_nat_entry *mapped_state = NULL;
+
+		ret = snat_v6_nat_handle_mapping(ctx, tuple, fraginfo, &mapped_state,
 						 l4_off, target, trace, ext_err);
 		if (ret < 0)
 			return ret;
+		state = mapped_state;
 		/* GH-40991: Verifier workaround for RHEL8.6 kernel: */
 		if (!state)
 			return DROP_NAT_NO_MAPPING;

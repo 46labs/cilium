@@ -1709,7 +1709,7 @@ lb4_fill_key(struct lb4_key *key, const struct ipv4_ct_tuple *tuple)
  */
 static __always_inline int
 lb4_set_tos(struct __ctx_buff *ctx, const struct lb4_service *svc,
-	    struct iphdr *ip4, int l3_off)
+	    const struct iphdr *ip4, int l3_off)
 {
 	__u8 new_tos = svc->tos;
 	__u8 old_tos = ip4->tos;
