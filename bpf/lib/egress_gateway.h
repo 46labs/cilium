@@ -179,8 +179,10 @@ egress_gw_request_needs_redirect(struct ipv4_ct_tuple *rtuple __maybe_unused,
 static __always_inline
 bool egress_gw_sip_inspection_needed(__be32 saddr __maybe_unused,
 				     __be32 daddr __maybe_unused,
-				     __u8 tos __maybe_unused, __u16 *sport)
+				     __u8 tos __maybe_unused,
+				     __u16 *sport __maybe_unused)
 {
+#if defined(ENABLE_EGRESS_GATEWAY)
 	const struct egress_gw_policy_entry *egress_gw_policy;
 
 	egress_gw_policy = lookup_ip4_egress_gw_policy(saddr, daddr, tos);
@@ -193,6 +195,9 @@ bool egress_gw_sip_inspection_needed(__be32 saddr __maybe_unused,
 
 	*sport = egress_gw_policy->sip_port;
 	return egress_gw_policy->sip_inspect;
+#else
+	return false;
+#endif /* ENABLE_EGRESS_GATEWAY */
 }
 
 static __always_inline bool
