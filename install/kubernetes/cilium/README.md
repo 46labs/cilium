@@ -384,6 +384,7 @@ contributors across the globe, there is almost always someone available to help.
 | enableMasqueradeRouteSource | bool | `false` | Enables masquerading to the source of the route for traffic leaving the node from endpoints. |
 | enableNoServiceEndpointsRoutable | bool | `true` | Enable routing to a service that has zero endpoints |
 | enableNonDefaultDenyPolicies | bool | `true` | Enable Non-Default-Deny policies |
+| enableSIPInspection | bool | `true` | Enable the 46labs SIP datapath extensions (Call-ID conntrack keys, SIP timeouts and SIP-specific LB/NAT). Drain SIP traffic before changing this agent startup setting; existing conntrack/NAT entries are not migrated. |
 | enableXTSocketFallback | bool | `true` | Enables the fallback compatibility solution for when the xt_socket kernel module is missing and it is needed for the datapath L7 redirection to work properly. See documentation for details on when this can be disabled: https://docs.cilium.io/en/stable/operations/system_requirements/#linux-kernel. |
 | encryption.enabled | bool | `false` | Enable transparent network encryption. |
 | encryption.ipsec.encryptedOverlay | bool | `false` | Enable IPsec encrypted overlay |

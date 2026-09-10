@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common.h"
+#include <bpf/config/node.h>
 #include "jhash.h"
 
 /* The daddr is explicitly excluded from the hash here in order to allow for
@@ -17,7 +18,7 @@ __hash_from_tuple_v4(const struct ipv4_ct_tuple *tuple, __be16 sport, __be16 dpo
 	ret = jhash_3words(tuple->saddr, ((__u32)dport << 16) | sport,
 			    tuple->nexthdr, HASH_INIT4_SEED);
 
-	return tuple->sip_call_id_hash == 0 ?
+	return !sip_inspection_enabled() || tuple->sip_call_id_hash == 0 ?
 		       ret :
 		       jhash_1word(tuple->sip_call_id_hash, ret);
 }

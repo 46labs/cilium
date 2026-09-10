@@ -5,7 +5,12 @@
 
 #include <linux/udp.h>
 
+#include "common.h"
+#include <bpf/config/node.h>
+
 #define NOT_FOUND 0
+
+#ifdef ENABLE_SIP_INSPECTION
 
 /* sip_inspect() uses direct packet access. TC skbs received after tunnel
  * decapsulation may keep the SIP payload outside the linear head, even though
@@ -218,3 +223,12 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 
 	return hash;
 }
+
+#else /* ENABLE_SIP_INSPECTION */
+
+static __always_inline __u32 sip_inspect(__maybe_unused struct __ctx_buff *ctx)
+{
+	return NOT_FOUND;
+}
+
+#endif /* ENABLE_SIP_INSPECTION */

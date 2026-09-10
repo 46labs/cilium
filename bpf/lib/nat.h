@@ -242,7 +242,7 @@ static __always_inline int snat_v4_new_mapping(struct __ctx_buff *ctx, void *map
 	set_v4_rtuple(otuple, ostate, &rtuple);
 	/* .dport is selected below */
 
-	if (otuple->sip_call_id_hash) {
+	if (sip_inspection_enabled() && otuple->sip_call_id_hash) {
 		port = target->sip_port;
 	} else {
 		port = __snat_try_keep_port(target->min_port,

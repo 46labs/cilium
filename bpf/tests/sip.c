@@ -3,6 +3,11 @@
 #include <bpf/ctx/skb.h>
 #include "common.h"
 #include "pktgen.h"
+
+#ifndef SIP_TEST_DISABLED
+#define ENABLE_SIP_INSPECTION 1
+#endif
+
 #include "lib/sip.h"
 
 /* Enable code paths under test */
@@ -31,6 +36,14 @@
 	"87cbb257-0123456789abcdefghijklmnopqrstuvwxyz" \
 	"ABCDEFGHIJKLMNOPQRSTU"
 #define SIP_LONG_CALL_ID_HASH 0x5eafea30
+
+/* Run the same valid payload corpus with the global switch off as well. */
+#ifdef SIP_TEST_DISABLED
+#undef SIP_CALL_ID_HASH
+#undef SIP_LONG_CALL_ID_HASH
+#define SIP_CALL_ID_HASH 0
+#define SIP_LONG_CALL_ID_HASH 0
+#endif
 
 #define sip_register                              \
 	"REGISTER sip:bob@biloxi.com SIP/2.0\r\n" \

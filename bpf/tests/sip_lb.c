@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 /* Copyright Authors of Cilium */
 
+#define ENABLE_SIP_INSPECTION 1
+
 #include <bpf/ctx/skb.h>
 #include "common.h"
 #include "pktgen.h"

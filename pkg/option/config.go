@@ -514,6 +514,9 @@ const (
 	CTMapEntriesTimeoutSVCAnyName      = "bpf-ct-timeout-service-any"
 	CTMapEntriesTimeoutSIPName         = "bpf-ct-timeout-sip"
 
+	// EnableSIPInspection controls all 46labs SIP datapath extensions.
+	EnableSIPInspection = "enable-sip-inspection"
+
 	// NATMapEntriesGlobalDefault holds the default size of the NAT map
 	// and is 2/3 of the full CT size as a heuristic
 	NATMapEntriesGlobalDefault = int((CTMapEntriesGlobalTCPDefault + CTMapEntriesGlobalAnyDefault) * 2 / 3)
@@ -1257,6 +1260,9 @@ type DaemonConfig struct {
 	CTMapEntriesTimeoutSYN         time.Duration
 	CTMapEntriesTimeoutFIN         time.Duration
 
+	// EnableSIPInspection enables Call-ID conntrack keys and SIP-specific LB/NAT.
+	EnableSIPInspection bool
+
 	// MonitorAggregationInterval configures the interval between monitor
 	// messages when monitor aggregation is enabled.
 	MonitorAggregationInterval time.Duration
@@ -1869,6 +1875,7 @@ var (
 		EnableIPv6:                      defaults.EnableIPv6,
 		EnableIPv6NDP:                   defaults.EnableIPv6NDP,
 		EnableSCTP:                      defaults.EnableSCTP,
+		EnableSIPInspection:             true,
 		EnableL7Proxy:                   defaults.EnableL7Proxy,
 		ToFQDNsMaxIPsPerHost:            defaults.ToFQDNsMaxIPsPerHost,
 		IdentityChangeGracePeriod:       defaults.IdentityChangeGracePeriod,
@@ -2473,6 +2480,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
 	c.CTMapEntriesTimeoutSVCTCPGrace = vp.GetDuration(CTMapEntriesTimeoutSVCTCPGraceName)
 	c.CTMapEntriesTimeoutSVCAny = vp.GetDuration(CTMapEntriesTimeoutSVCAnyName)
 	c.CTMapEntriesTimeoutSIP = vp.GetDuration(CTMapEntriesTimeoutSIPName)
+	c.EnableSIPInspection = vp.GetBool(EnableSIPInspection)
 	c.CTMapEntriesTimeoutSYN = vp.GetDuration(CTMapEntriesTimeoutSYNName)
 	c.CTMapEntriesTimeoutFIN = vp.GetDuration(CTMapEntriesTimeoutFINName)
 	c.PolicyAuditMode = vp.GetBool(PolicyAuditModeArg)

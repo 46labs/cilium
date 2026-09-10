@@ -4,6 +4,7 @@
 #pragma once
 
 #include <linux/ip.h>
+#include <bpf/config/node.h>
 
 #include "dbg.h"
 #include "l4.h"
@@ -100,7 +101,7 @@ ipv4_frag_get_l4ports(const struct ipv4_frag_id *frag_id,
 	/* Do not make ports a pointer to map data, copy from map */
 	memcpy(ports, tmp, 2 * sizeof(__u16));
 	if (sip_call_id_hash)
-		*sip_call_id_hash = tmp->sip_call_id_hash;
+		*sip_call_id_hash = sip_inspection_enabled() ? tmp->sip_call_id_hash : 0;
 	return 0;
 }
 
@@ -129,8 +130,8 @@ ipv4_handle_fragmentation(struct __ctx_buff *ctx,
 		return DROP_CT_INVALID_HDR;
 
 	memcpy(&tmp, ports, 2 * sizeof(__u16));
-	if (sip_call_id_hash)
-		tmp.sip_call_id_hash = *sip_call_id_hash;
+	tmp.sip_call_id_hash = sip_inspection_enabled() && sip_call_id_hash ?
+			       *sip_call_id_hash : 0;
 
 	if (unlikely(ipfrag_is_fragment(fraginfo))) {
 		/* First logical fragment for this datagram (not necessarily the first
@@ -154,6 +155,8 @@ ipv4_load_l4_ports(struct __ctx_buff *ctx, struct iphdr *ip4 __maybe_unused,
 		   fraginfo_t fraginfo, int l4_off, enum ct_dir dir __maybe_unused,
 		   __be16 *ports, __u32 *sip_call_id_hash __maybe_unused)
 {
+	if (!sip_inspection_enabled() && sip_call_id_hash)
+		*sip_call_id_hash = 0;
 #ifdef ENABLE_IPV4_FRAGMENTS
 	return ipv4_handle_fragmentation(ctx, ip4, fraginfo, l4_off, dir,
 					 (struct ipv4_frag_l4ports *)ports, sip_call_id_hash);

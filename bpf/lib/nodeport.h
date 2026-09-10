@@ -2933,10 +2933,10 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		}
 
 #ifdef LB_SELECTION_PER_SERVICE
-		if (backend_local || svc->sip_inspect ||
+		if (backend_local || (sip_inspection_enabled() && svc->sip_inspect) ||
 		    lb4_algorithm(svc) == LB_SELECTION_SRC_RANGE_IDX) {
 #else
-		if (backend_local || svc->sip_inspect) {
+		if (backend_local || (sip_inspection_enabled() && svc->sip_inspect)) {
 #endif
 			ctx_set_xfer(ctx, XFER_PKT_NO_SVC);
 			return CTX_ACT_OK;
@@ -3023,7 +3023,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 		if (!revalidate_data(ctx, &data, &data_end, &ip4))
 			return DROP_INVALID;
 
-		if (svc->sip_inspect) {
+		if (sip_inspection_enabled() && svc->sip_inspect) {
 #ifdef ENABLE_MASQUERADE_IPV4
 			if (tuple.sip_call_id_hash) {
 				struct ipv4_nat_entry *state = NULL;

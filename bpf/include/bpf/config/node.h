@@ -35,3 +35,10 @@ NODE_CONFIG(__u8, tracing_ip_option_type, "The IP option type to use for packet 
 NODE_CONFIG(bool, policy_deny_response_enabled, "Enable ICMP responses for policy-denied traffic")
 
 NODE_CONFIG(bool, hybrid_routing_enabled, "Enable hybrid mode routing based on subnet IDs")
+
+/* Keep this compile-time so disabled programs contain no SIP datapath logic. */
+#ifdef ENABLE_SIP_INSPECTION
+# define sip_inspection_enabled() 1
+#else
+# define sip_inspection_enabled() 0
+#endif
