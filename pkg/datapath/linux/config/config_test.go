@@ -172,6 +172,18 @@ func TestPrivilegedWriteNodeConfig(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSIPInspectionCompileTimeDefine(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		defines := dpdef.Map{}
+		addSIPInspectionDefine(defines, enabled)
+		value, present := defines["ENABLE_SIP_INSPECTION"]
+		require.Equal(t, enabled, present)
+		if enabled {
+			require.Equal(t, "1", value)
+		}
+	}
+}
+
 func TestPrivilegedWriteNetdevConfig(t *testing.T) {
 	setupConfigSuite(t)
 	writeConfig(t, "netdev", func(w io.Writer, dp datapath.ConfigWriter) error {

@@ -258,7 +258,7 @@ static __always_inline __u32 ct_update_timeout(struct ct_entry *entry,
 			lifetime = bpf_sec_to_mono(CT_SYN_TIMEOUT);
 		}
 	}
-	if (entry->is_sip) {
+	if (sip_inspection_enabled() && entry->is_sip) {
 		lifetime = bpf_sec_to_mono(CT_SIP_SESSION_LIFETIME);
 	}
 
@@ -1148,7 +1148,7 @@ static __always_inline int ct_create4(const void *map_main,
 	if (ct_state)
 		ct_create_fill_entry(&entry, ct_state, dir);
 
-	entry.is_sip = tuple->sip_call_id_hash > 0;
+	entry.is_sip = sip_inspection_enabled() && tuple->sip_call_id_hash > 0;
 
 	seen_flags.value |= is_tcp ? TCP_FLAG_SYN : 0;
 	ct_update_timeout(&entry, is_tcp, dir, seen_flags);

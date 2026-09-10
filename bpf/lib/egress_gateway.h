@@ -182,6 +182,8 @@ bool egress_gw_sip_inspection_needed(__be32 saddr __maybe_unused,
 				     __u8 tos __maybe_unused,
 				     __u16 *sport __maybe_unused)
 {
+	if (!sip_inspection_enabled())
+		return false;
 #if defined(ENABLE_EGRESS_GATEWAY)
 	const struct egress_gw_policy_entry *egress_gw_policy;
 
@@ -221,8 +223,8 @@ egress_gw_snat_needed(__be32 saddr __maybe_unused,
 		return false;
 
 	*snat_addr = egress_gw_policy->egress_ip;
-	*sip_inspect = egress_gw_policy->sip_inspect;
-	*sip_port = egress_gw_policy->sip_port;
+	*sip_inspect = sip_inspection_enabled() && egress_gw_policy->sip_inspect;
+	*sip_port = sip_inspection_enabled() ? egress_gw_policy->sip_port : 0;
 #ifdef EGRESS_IFINDEX
 	*egress_ifindex = EGRESS_IFINDEX;
 #endif

@@ -231,6 +231,8 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		cDefinesMap["ENABLE_SCTP"] = "1"
 	}
 
+	addSIPInspectionDefine(cDefinesMap, option.Config.EnableSIPInspection)
+
 	if option.Config.ServiceNoBackendResponse == option.ServiceNoBackendResponseReject {
 		cDefinesMap["SERVICE_NO_BACKEND_RESPONSE"] = "1"
 	}
@@ -645,6 +647,12 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	}
 
 	return fw.Flush()
+}
+
+func addSIPInspectionDefine(defines dpdef.Map, enabled bool) {
+	if enabled {
+		defines["ENABLE_SIP_INSPECTION"] = "1"
+	}
 }
 
 // vlanFilterMacros generates VLAN_FILTER macros which
