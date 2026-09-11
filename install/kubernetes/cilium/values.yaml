@@ -20,6 +20,11 @@ commonLabels: {}
 # This flag is not required for new installations.
 # For example: '1.7', '1.8', '1.9'
 upgradeCompatibility: null
+
+# -- Enable the SIP datapath extensions (Call-ID conntrack keys, SIP
+# timeouts and SIP-specific LB/NAT). Drain SIP traffic before changing this
+# agent startup setting; existing conntrack/NAT entries are not migrated.
+enableSIPInspection: true
 debug:
   # -- Enable debug logging
   enabled: false

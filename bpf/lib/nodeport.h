@@ -2933,10 +2933,19 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		}
 
 #ifdef LB_SELECTION_PER_SERVICE
+#ifdef ENABLE_SIP_INSPECTION
 		if (backend_local || svc->sip_inspect ||
 		    lb4_algorithm(svc) == LB_SELECTION_SRC_RANGE_IDX) {
 #else
+		if (backend_local ||
+		    lb4_algorithm(svc) == LB_SELECTION_SRC_RANGE_IDX) {
+#endif
+#else
+#ifdef ENABLE_SIP_INSPECTION
 		if (backend_local || svc->sip_inspect) {
+#else
+		if (backend_local) {
+#endif
 #endif
 			ctx_set_xfer(ctx, XFER_PKT_NO_SVC);
 			return CTX_ACT_OK;
@@ -2991,10 +3000,12 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	fraginfo = ipfrag_encode_ipv4(ip4);
 	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
+#ifdef ENABLE_SIP_INSPECTION
 	tuple.sip_call_id_hash = sip_inspect(ctx);
 	/* sip_inspect() may linearize the skb and invalidate packet pointers. */
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
+#endif
 	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
@@ -3023,6 +3034,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 		if (!revalidate_data(ctx, &data, &data_end, &ip4))
 			return DROP_INVALID;
 
+#ifdef ENABLE_SIP_INSPECTION
 		if (svc->sip_inspect) {
 #ifdef ENABLE_MASQUERADE_IPV4
 			if (tuple.sip_call_id_hash) {
@@ -3039,6 +3051,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 			}
 #endif
 		}
+#endif
 
 		return nodeport_svc_lb4(ctx, &tuple, svc, &key, ip4, l3_off,
 					fraginfo, l4_off, src_sec_identity,

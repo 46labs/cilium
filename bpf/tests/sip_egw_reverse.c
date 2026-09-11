@@ -5,6 +5,8 @@
 #include "common.h"
 #include "pktgen.h"
 
+#ifdef ENABLE_SIP_INSPECTION
+
 #define ENABLE_IPV4                    1
 #define ENABLE_NODEPORT                1
 #define ENABLE_EGRESS_GATEWAY          1
@@ -706,3 +708,5 @@ int sip_egw_local_gateway_non_sip_reply_check(const struct __ctx_buff *ctx)
 
 	test_finish();
 }
+
+#endif /* ENABLE_SIP_INSPECTION */

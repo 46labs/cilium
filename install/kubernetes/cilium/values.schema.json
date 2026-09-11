@@ -1913,6 +1913,9 @@
     "enableNonDefaultDenyPolicies": {
       "type": "boolean"
     },
+    "enableSIPInspection": {
+      "type": "boolean"
+    },
     "enableXTSocketFallback": {
       "type": "boolean"
     },

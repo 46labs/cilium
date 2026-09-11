@@ -384,12 +384,14 @@ static __always_inline int nodeport_snat_fwd_ipv4(struct __ctx_buff *ctx,
 	if (IS_ERR(ret))
 		goto out;
 
+#ifdef ENABLE_SIP_INSPECTION
 	if (target.sip_needed) {
 		tuple.sip_call_id_hash = sip_inspect(ctx);
 		/* sip_inspect() may linearize the skb and invalidate packet pointers. */
 		if (!revalidate_data(ctx, &data, &data_end, &ip4))
 			return DROP_INVALID;
 	}
+#endif
 
 #if defined(ENABLE_EGRESS_GATEWAY_COMMON) && defined(IS_BPF_HOST)
 	if (target.egress_gateway) {
@@ -490,10 +492,12 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	 * dialog can trigger RevDNAT and suppress the EgressGW SNAT mapping which
 	 * pins replies to their original LB backend.
 	 */
+#ifdef ENABLE_SIP_INSPECTION
 	tuple.sip_call_id_hash = sip_inspect(ctx);
 	/* sip_inspect() may linearize the skb and invalidate packet pointers. */
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
+#endif
 
 	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
