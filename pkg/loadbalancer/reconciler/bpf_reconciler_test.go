@@ -1709,10 +1709,9 @@ func TestBPFOpsSourceRangesConflict(t *testing.T) {
 	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &fe), "Update")
 
 	// Exactly one entry exists per (CIDR, frontend) pair -- the map key does
-	// not include the backend ID -- and it ends up pointing at whichever
-	// backend updateFrontend processed last for that key.
-	require.Equal(t, 0, countLines("CIDR=10.0.0.0/8 BEID=1"), "expected the first-processed backend to be overwritten")
-	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 BEID=2"), "expected the last-processed backend to win the shared entry")
+	// not include the backend ID.
+	require.Equal(t, 2, countLines("CIDR=10.0.0.0/8 BEID=1"), "expected the first-processed backend to keep the shared entry")
+	require.Equal(t, 0, countLines("CIDR=10.0.0.0/8 BEID=2"), "expected the later-processed backend's conflicting entry to be ignored")
 }
 
 // showMaps formats the map dumps as the Go code expected in the test cases.
