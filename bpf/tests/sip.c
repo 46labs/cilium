@@ -3,6 +3,11 @@
 #include <bpf/ctx/skb.h>
 #include "common.h"
 #include "pktgen.h"
+
+#ifndef ENABLE_SIP_INSPECTION
+#define ENABLE_SIP_INSPECTION 1
+#endif
+
 #include "lib/sip.h"
 
 /* Enable code paths under test */

@@ -527,6 +527,16 @@ static __always_inline int drop_for_direction(struct __ctx_buff *ctx,
 }
 #endif /* ENABLE_IPV4 || ENABLE_IPV6 */
 
+#ifdef ENABLE_SIP_INSPECTION
+#define CT_LOOKUP4_SIP_HASH(ctx, tuple, dir, data, data_end, ip4, ext_err)	\
+	tuple->sip_call_id_hash = sip_inspect(ctx);				\
+	/* sip_inspect() may linearize the skb and invalidate packet pointers. */ \
+	if (!revalidate_data(ctx, &data, &data_end, &ip4))			\
+		return drop_for_direction(ctx, dir, DROP_INVALID, ext_err);
+#else
+#define CT_LOOKUP4_SIP_HASH(ctx, tuple, dir, data, data_end, ip4, ext_err)
+#endif
+
 #define TAIL_CT_LOOKUP4(ID, NAME, DIR, CONDITION, TARGET_ID, TARGET_NAME)	\
 __declare_tail(ID)								\
 static __always_inline								\
@@ -552,10 +562,7 @@ int NAME(struct __ctx_buff *ctx)						\
 	tuple->nexthdr = ip4->protocol;						\
 	tuple->daddr = ip4->daddr;						\
 	tuple->saddr = ip4->saddr;						\
-	tuple->sip_call_id_hash = sip_inspect(ctx);				\
-	/* sip_inspect() may linearize the skb and invalidate packet pointers. */	\
-	if (!revalidate_data(ctx, &data, &data_end, &ip4))			\
-		return drop_for_direction(ctx, DIR, DROP_INVALID, ext_err);	\
+	CT_LOOKUP4_SIP_HASH(ctx, tuple, DIR, data, data_end, ip4, ext_err)	\
 	ct_buffer.l4_off = ETH_HLEN + ipv4_hdrlen(ip4);				\
 										\
 	map = select_ct_map4(ctx, DIR, tuple);					\
