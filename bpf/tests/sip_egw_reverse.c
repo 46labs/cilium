@@ -5,6 +5,10 @@
 #include "common.h"
 #include "pktgen.h"
 
+#ifndef ENABLE_SIP_INSPECTION
+#define ENABLE_SIP_INSPECTION 1
+#endif
+
 #define ENABLE_IPV4                    1
 #define ENABLE_NODEPORT                1
 #define ENABLE_EGRESS_GATEWAY          1

@@ -223,7 +223,9 @@ set_v4_rtuple(const struct ipv4_ct_tuple *otuple,
 	rtuple->daddr = ostate->to_saddr;
 	rtuple->sport = otuple->dport;
 	rtuple->dport = ostate->to_sport;
+#ifdef ENABLE_SIP_INSPECTION
 	rtuple->sip_call_id_hash = otuple->sip_call_id_hash;
+#endif
 }
 
 static __always_inline int snat_v4_new_mapping(struct __ctx_buff *ctx, void *map,
@@ -252,9 +254,12 @@ static __always_inline int snat_v4_new_mapping(struct __ctx_buff *ctx, void *map
 	set_v4_rtuple(otuple, ostate, &rtuple);
 	/* .dport is selected below */
 
+#ifdef ENABLE_SIP_INSPECTION
 	if (otuple->sip_call_id_hash) {
 		port = target->sip_port;
-	} else {
+	} else
+#endif
+	{
 		port = __snat_try_keep_port(target->min_port,
 					     target->max_port,
 					     bpf_ntohs(otuple->sport));
@@ -439,7 +444,9 @@ snat_v4_rev_nat_handle_mapping(struct __ctx_buff *ctx,
 		otuple.daddr = tuple->saddr;
 		otuple.dport = tuple->sport;
 		otuple.nexthdr = tuple->nexthdr;
+#ifdef ENABLE_SIP_INSPECTION
 		otuple.sip_call_id_hash = tuple->sip_call_id_hash;
+#endif
 		otuple.flags = TUPLE_F_OUT;
 
 		lookup_result = __snat_lookup(map, &otuple);
@@ -648,7 +655,9 @@ static __always_inline void snat_v4_init_tuple(const struct iphdr *ip4,
 	tuple->daddr = ip4->daddr;
 	tuple->saddr = ip4->saddr;
 	tuple->flags = dir;
+#ifdef ENABLE_SIP_INSPECTION
 	tuple->sip_call_id_hash = 0;
+#endif
 }
 
 /* The function contains a core logic for deciding whether an egressing packet
@@ -734,7 +743,7 @@ snat_v4_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 			 * reply.
 			 */
 			if (ct_is_reply4(get_ct_map4(tuple), tuple)) {
-#if defined(ENABLE_EGRESS_GATEWAY_COMMON)
+#if defined(ENABLE_EGRESS_GATEWAY_COMMON) && defined(ENABLE_SIP_INSPECTION)
 				/* A SIP reply sent by an LB which is local to the egress
 				 * gateway still needs SNAT. Besides translating the source,
 				 * this creates the Call-ID reverse NAT entry used to pin
@@ -1224,10 +1233,12 @@ snat_v4_rev_nat(struct __ctx_buff *ctx, const struct ipv4_nat_target *target,
 	fraginfo = ipfrag_encode_ipv4(ip4);
 
 	snat_v4_init_tuple(ip4, NAT_DIR_INGRESS, &tuple);
+#ifdef ENABLE_SIP_INSPECTION
 	tuple.sip_call_id_hash = sip_inspect(ctx);
 	/* sip_inspect() may linearize the skb and invalidate packet pointers. */
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
+#endif
 
 	off = ((void *)ip4 - data) + ipv4_hdrlen(ip4);
 	switch (tuple.nexthdr) {
@@ -1244,7 +1255,11 @@ snat_v4_rev_nat(struct __ctx_buff *ctx, const struct ipv4_nat_target *target,
 		ipv4_ct_tuple_swap_ports(&tuple);
 		port_off = TCP_DPORT_OFF;
 
+#ifdef ENABLE_SIP_INSPECTION
 		if (!tuple.sip_call_id_hash && snat_v4_rev_nat_can_skip(target, &tuple))
+#else
+		if (snat_v4_rev_nat_can_skip(target, &tuple))
+#endif
 			return NAT_PUNT_TO_STACK;
 
 		break;

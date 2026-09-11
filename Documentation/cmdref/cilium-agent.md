@@ -41,6 +41,7 @@ cilium-agent [flags]
       --bpf-ct-timeout-service-any duration                       Timeout for service entries in non-TCP CT table (default 1m0s)
       --bpf-ct-timeout-service-tcp duration                       Timeout for established service entries in TCP CT table (default 2h13m20s)
       --bpf-ct-timeout-service-tcp-grace duration                 Timeout for graceful shutdown of service entries in TCP CT table (default 1m0s)
+      --bpf-ct-timeout-sip duration                               Timeout for SIP entries in CT table (default 20m0s)
       --bpf-distributed-lru                                       Enable per-CPU BPF LRU backend memory
       --bpf-events-drop-enabled                                   Expose 'drop' events for Cilium monitor and/or Hubble (default true)
       --bpf-events-policy-verdict-enabled                         Expose 'policy verdict' events for Cilium monitor and/or Hubble (default true)
@@ -184,6 +185,7 @@ cilium-agent [flags]
       --enable-route-mtu-for-cni-chaining                         Enable route MTU for pod netns when CNI chaining is used
       --enable-sctp                                               Enable SCTP support (beta)
       --enable-service-topology                                   Enable support for service topology aware hints
+      --enable-sip-inspection                                     Enable SIP inspection, Call-ID conntrack keys and SIP-specific LB/NAT (restart required; drain SIP traffic before changing) (default true)
       --enable-standalone-dns-proxy                               Enables standalone DNS proxy
       --enable-tcx                                                Attach endpoint programs using tcx if supported by the kernel (default true)
       --enable-tracing                                            Enable tracing while determining policy (debugging)
