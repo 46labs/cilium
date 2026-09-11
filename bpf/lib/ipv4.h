@@ -89,7 +89,8 @@ static __always_inline bool ipv4_is_in_subnet(__be32 addr,
 #ifdef ENABLE_IPV4_FRAGMENTS
 static __always_inline int
 ipv4_frag_get_l4ports(const struct ipv4_frag_id *frag_id,
-		      struct ipv4_frag_l4ports *ports, __u32 *sip_call_id_hash)
+		      struct ipv4_frag_l4ports *ports,
+		      __u32 *sip_call_id_hash __maybe_unused)
 {
 	struct ipv4_frag_l4ports *tmp;
 
@@ -99,8 +100,10 @@ ipv4_frag_get_l4ports(const struct ipv4_frag_id *frag_id,
 
 	/* Do not make ports a pointer to map data, copy from map */
 	memcpy(ports, tmp, 2 * sizeof(__u16));
+#ifdef ENABLE_SIP_INSPECTION
 	if (sip_call_id_hash)
 		*sip_call_id_hash = tmp->sip_call_id_hash;
+#endif
 	return 0;
 }
 
@@ -111,7 +114,7 @@ ipv4_handle_fragmentation(struct __ctx_buff *ctx,
 			  int l4_off,
 			  enum ct_dir ct_dir,
 			  struct ipv4_frag_l4ports *ports,
-			  __u32 *sip_call_id_hash)
+			  __u32 *sip_call_id_hash __maybe_unused)
 {
 	struct ipv4_frag_id frag_id = {
 		.daddr = ip4->daddr,
@@ -119,7 +122,7 @@ ipv4_handle_fragmentation(struct __ctx_buff *ctx,
 		.id = (__be16)ipfrag_get_id(fraginfo),
 		.proto = ipfrag_get_protocol(fraginfo),
 	};
-	struct ipv4_frag_l4ports tmp;
+	struct ipv4_frag_l4ports tmp = {};
 
 	if (unlikely(!ipfrag_has_l4_header(fraginfo)))
 		return ipv4_frag_get_l4ports(&frag_id, ports, sip_call_id_hash);
@@ -129,8 +132,10 @@ ipv4_handle_fragmentation(struct __ctx_buff *ctx,
 		return DROP_CT_INVALID_HDR;
 
 	memcpy(&tmp, ports, 2 * sizeof(__u16));
+#ifdef ENABLE_SIP_INSPECTION
 	if (sip_call_id_hash)
 		tmp.sip_call_id_hash = *sip_call_id_hash;
+#endif
 
 	if (unlikely(ipfrag_is_fragment(fraginfo))) {
 		/* First logical fragment for this datagram (not necessarily the first

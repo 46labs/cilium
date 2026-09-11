@@ -5,6 +5,8 @@
 #include "common.h"
 #include "pktgen.h"
 
+#ifdef ENABLE_SIP_INSPECTION
+
 /* Enable code paths under test */
 #define ENABLE_IPV4
 #define ENABLE_NODEPORT
@@ -147,3 +149,5 @@ int sip_lb_check(__maybe_unused const struct __ctx_buff *ctx)
 
 	test_finish();
 }
+
+#endif /* ENABLE_SIP_INSPECTION */

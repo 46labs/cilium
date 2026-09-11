@@ -103,6 +103,7 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 data:
+  enable-sip-inspection: {{ .Values.enableSIPInspection | quote }}
 {{- if .Values.etcd.enabled }}
   # The kvstore configuration is used to enable use of a kvstore for state
   # storage. This can be provided with an external kvstore.

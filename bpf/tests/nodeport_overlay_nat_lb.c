@@ -311,6 +311,7 @@ int nodeport_overlay_nat_2_reply_check(const struct __ctx_buff *ctx)
  * service fallback intentionally points at LB4; the pre-service SIP reverse
  * NAT lookup must restore LB3 instead.
  */
+#ifdef ENABLE_SIP_INSPECTION
 #define SIP_LB3_IP              IPV4(10, 244, 6, 114)
 #define SIP_LB3_PORT            __bpf_htons(6000)
 #define SIP_LB4_IP              IPV4(10, 244, 5, 210)
@@ -404,3 +405,5 @@ int nodeport_overlay_sip_reply_check(const struct __ctx_buff *ctx)
 
 	test_finish();
 }
+
+#endif /* ENABLE_SIP_INSPECTION */

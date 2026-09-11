@@ -602,6 +602,9 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
 	flags.Duration(option.CTMapEntriesTimeoutSIPName, 1200*time.Second, "Timeout for SIP entries in CT table")
 	option.BindEnv(vp, option.CTMapEntriesTimeoutSIPName)
 
+	flags.Bool(option.EnableSIPInspection, true, "Enable SIP inspection, Call-ID conntrack keys and SIP-specific LB/NAT (restart required; drain SIP traffic before changing)")
+	option.BindEnv(vp, option.EnableSIPInspection)
+
 	flags.Duration(option.CTMapEntriesTimeoutSYNName, 60*time.Second, "Establishment timeout for entries in TCP CT table")
 	option.BindEnv(vp, option.CTMapEntriesTimeoutSYNName)
 

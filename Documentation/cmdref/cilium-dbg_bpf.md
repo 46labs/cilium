@@ -26,6 +26,7 @@ Direct access to local BPF maps
 * [cilium-dbg bpf auth](cilium-dbg_bpf_auth.md)	 - Manage authenticated connections between identities
 * [cilium-dbg bpf bandwidth](cilium-dbg_bpf_bandwidth.md)	 - BPF datapath bandwidth settings
 * [cilium-dbg bpf config](cilium-dbg_bpf_config.md)	 - Manage runtime config
+* [cilium-dbg bpf crap](cilium-dbg_bpf_crap.md)	 - Manage the CRAP rules
 * [cilium-dbg bpf ct](cilium-dbg_bpf_ct.md)	 - Connection tracking tables
 * [cilium-dbg bpf egress](cilium-dbg_bpf_egress.md)	 - Manage the egress routing rules
 * [cilium-dbg bpf endpoint](cilium-dbg_bpf_endpoint.md)	 - Local endpoint map

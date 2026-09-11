@@ -3,6 +3,9 @@
 #include <bpf/ctx/skb.h>
 #include "common.h"
 #include "pktgen.h"
+
+#ifdef ENABLE_SIP_INSPECTION
+
 #include "lib/sip.h"
 
 /* Enable code paths under test */
@@ -587,3 +590,5 @@ int bpf_test_no_callid(__maybe_unused struct __ctx_buff *ctx)
 
 	test_finish();
 }
+
+#endif /* ENABLE_SIP_INSPECTION */
