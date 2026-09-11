@@ -5,6 +5,8 @@
 
 #include <linux/udp.h>
 
+#ifdef ENABLE_SIP_INSPECTION
+
 #define NOT_FOUND 0
 
 /* sip_inspect() uses direct packet access. TC skbs received after tunnel
@@ -218,3 +220,5 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 
 	return hash;
 }
+
+#endif /* ENABLE_SIP_INSPECTION */

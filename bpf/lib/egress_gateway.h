@@ -176,6 +176,7 @@ egress_gw_request_needs_redirect(struct ipv4_ct_tuple *rtuple __maybe_unused,
 #endif /* ENABLE_EGRESS_GATEWAY */
 }
 
+#ifdef ENABLE_SIP_INSPECTION
 static __always_inline
 bool egress_gw_sip_inspection_needed(__be32 saddr __maybe_unused,
 				     __be32 daddr __maybe_unused,
@@ -199,6 +200,7 @@ bool egress_gw_sip_inspection_needed(__be32 saddr __maybe_unused,
 	return false;
 #endif /* ENABLE_EGRESS_GATEWAY */
 }
+#endif /* ENABLE_SIP_INSPECTION */
 
 static __always_inline bool
 egress_gw_snat_needed(__be32 saddr __maybe_unused,
@@ -221,8 +223,10 @@ egress_gw_snat_needed(__be32 saddr __maybe_unused,
 		return false;
 
 	*snat_addr = egress_gw_policy->egress_ip;
+#ifdef ENABLE_SIP_INSPECTION
 	*sip_inspect = egress_gw_policy->sip_inspect;
 	*sip_port = egress_gw_policy->sip_port;
+#endif
 #ifdef EGRESS_IFINDEX
 	*egress_ifindex = EGRESS_IFINDEX;
 #endif
@@ -538,7 +542,7 @@ int egress_gw_handle_request(struct __ctx_buff *ctx, __be16 proto,
 	int l4_off;
 	const struct remote_endpoint_info *info;
 	const struct endpoint_info *src_ep;
-	bool is_reply;
+	bool is_reply __maybe_unused;
 	fraginfo_t fraginfo;
 	int ret;
 
@@ -572,11 +576,15 @@ int egress_gw_handle_request(struct __ctx_buff *ctx, __be16 proto,
 		 */
 		is_reply = ct_is_reply4(get_ct_map4(&tuple4), &tuple4);
 		if (is_reply) {
+#ifdef ENABLE_SIP_INSPECTION
 			__u16 sip_port;
 
 			if (!egress_gw_sip_inspection_needed(ip4->saddr, ip4->daddr,
 							 ip4->tos, &sip_port))
 				return CTX_ACT_OK;
+#else
+			return CTX_ACT_OK;
+#endif
 		}
 
 		src_ep = __lookup_ip4_endpoint(ip4->saddr);

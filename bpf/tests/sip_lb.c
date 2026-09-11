@@ -5,6 +5,10 @@
 #include "common.h"
 #include "pktgen.h"
 
+#ifndef ENABLE_SIP_INSPECTION
+#define ENABLE_SIP_INSPECTION 1
+#endif
+
 /* Enable code paths under test */
 #define ENABLE_IPV4
 #define ENABLE_NODEPORT
