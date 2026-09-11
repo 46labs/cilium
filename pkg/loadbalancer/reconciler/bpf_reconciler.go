@@ -109,12 +109,13 @@ func newBPFReconciler(p reconciler.Params, jobs job.Registry, health cell.Health
 }
 
 type BPFOps struct {
-	LBMaps    maps.LBMaps
-	log       rateLimitingLogger
-	db        *statedb.DB
-	nodeAddrs statedb.Table[tables.NodeAddress]
-	fes       statedb.Table[*loadbalancer.Frontend]
-	writer    *writer.Writer
+	LBMaps              maps.LBMaps
+	log                 rateLimitingLogger
+	db                  *statedb.DB
+	nodeAddrs           statedb.Table[tables.NodeAddress]
+	fes                 statedb.Table[*loadbalancer.Frontend]
+	lbSrcRangeGroupPods statedb.Table[reflectors.LbSrcRangeGroupPod]
+	writer              *writer.Writer
 
 	cfg           loadbalancer.Config
 	extCfg        loadbalancer.ExternalConfig
@@ -214,15 +215,16 @@ const (
 
 func newBPFOps(p bpfOpsParams) *BPFOps {
 	ops := &BPFOps{
-		cfg:       p.Config,
-		extCfg:    p.ExternalConfig,
-		maglev:    p.Maglev,
-		log:       newRateLimitingLogger(p.Log),
-		LBMaps:    p.LBMaps,
-		db:        p.DB,
-		nodeAddrs: p.NodeAddresses,
-		fes:       p.Fes,
-		writer:    p.Writer,
+		cfg:                 p.Config,
+		extCfg:              p.ExternalConfig,
+		maglev:              p.Maglev,
+		log:                 newRateLimitingLogger(p.Log),
+		LBMaps:              p.LBMaps,
+		db:                  p.DB,
+		nodeAddrs:           p.NodeAddresses,
+		fes:                 p.Fes,
+		lbSrcRangeGroupPods: p.LbSrcRangeGroupPods,
+		writer:              p.Writer,
 	}
 	ops.setLastUpdatedAt()
 
@@ -246,6 +248,38 @@ func newBPFOps(p bpfOpsParams) *BPFOps {
 
 				for change := range changes {
 					ops.applySourceRangePod(txn, change.Object, change.Deleted)
+				}
+
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-watch:
+				}
+			}
+		}),
+	)
+
+	p.Group.Add(
+		job.OneShot("start-lb-source-range-frontends-observer", func(ctx context.Context, health cell.Health) error {
+			wtxn := ops.db.WriteTxn(p.Fes)
+			changeIterator, err := p.Fes.Changes(wtxn)
+			wtxn.Commit()
+			if err != nil {
+				return err
+			}
+
+			health.OK("OK")
+
+			for {
+				txn := ops.db.ReadTxn()
+
+				changes, watch := changeIterator.Next(txn)
+
+				for change := range changes {
+					if change.Deleted {
+						continue
+					}
+					ops.applySourceRangesForFrontend(txn, change.Object)
 				}
 
 				select {
@@ -320,6 +354,52 @@ func (ops *BPFOps) applySourceRangePod(txn statedb.ReadTxn, pod reflectors.LbSrc
 		}
 	}
 
+	wtxn.Commit()
+}
+
+// applySourceRangesForFrontend re-derives [loadbalancer.Backend.SourceRanges] for every backend
+// of the given frontend from the current [reflectors.LbSrcRangeGroupPod] table.
+func (ops *BPFOps) applySourceRangesForFrontend(txn statedb.ReadTxn, frontend *loadbalancer.Frontend) {
+	if !frontend.Service.SourceAndPortRangeLbEnabled {
+		return
+	}
+
+	var newBes []loadbalancer.Backend
+
+	for b := range frontend.Backends {
+		var sourceRanges []loadbalancer.SourceAndPortRangeEntry
+
+		pod, _, found := ops.lbSrcRangeGroupPods.Get(txn, reflectors.PodByIp(b.Address.Addr()))
+		if found && pod.SourceRanges != "" {
+			var err error
+			sourceRanges, err = loadbalancer.ParseSourceRangeIndexes(pod.SourceRanges)
+			if err != nil {
+				ops.log.Warn("backend source ranges parsing",
+					logfields.Error, err,
+				)
+				continue
+			}
+		}
+
+		if slices.Equal(b.SourceRanges, sourceRanges) {
+			continue
+		}
+
+		backend := *b
+		backend.SourceRanges = sourceRanges
+		newBes = append(newBes, backend)
+	}
+
+	if len(newBes) == 0 {
+		return
+	}
+
+	wtxn := ops.writer.WriteTxn()
+	if err := ops.writer.UpsertBackends(wtxn, frontend.ServiceName, newBes[0].Source, slices.Values(newBes)); err != nil {
+		ops.log.Warn("backend source ranges update",
+			logfields.Error, err,
+		)
+	}
 	wtxn.Commit()
 }
 
@@ -1087,6 +1167,7 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 		ops.prevSourcePortRanges[fe.Address] = prevSourcePortRanges
 	}
 	orphanSourcePortRanges := prevSourcePortRanges.Clone()
+	ranges := map[sourceAndPortRangeKey]loadbalancer.BackendID{}
 
 	// Update backends that are new or changed.
 	slotID := 1
@@ -1184,8 +1265,6 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend, isLocalAddr func(ne
 		}
 
 		slotID++
-
-		ranges := map[sourceAndPortRangeKey]loadbalancer.BackendID{}
 
 		for _, entry := range be.SourceRanges {
 			if entry.Prefix.Addr().Is6() != fe.Address.IsIPv6() {
