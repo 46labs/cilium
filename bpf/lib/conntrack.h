@@ -1165,7 +1165,7 @@ static __always_inline int ct_create4(const void *map_main,
 		ct_create_fill_entry(entry, ct_state, dir);
 
 #ifdef ENABLE_SIP_INSPECTION
-	entry.is_sip = tuple->sip_call_id_hash > 0;
+	entry->is_sip = tuple->sip_call_id_hash > 0;
 #endif
 
 	seen_flags.value |= is_tcp ? TCP_FLAG_SYN : 0;
