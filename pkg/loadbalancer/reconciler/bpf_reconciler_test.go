@@ -1413,6 +1413,7 @@ func TestBPFOps(t *testing.T) {
 			DB:             db,
 			NodeAddresses:  nodeAddrs,
 			Frontends:      frontends,
+			Group:          fakeGroup{},
 		})
 
 		svc := baseService
@@ -1678,6 +1679,9 @@ func TestBPFOpsSourceRanges(t *testing.T) {
 	}
 	wtxn.Commit()
 
+	frontends, err := loadbalancer.NewFrontendsTable(cfg, db)
+	require.NoError(t, err)
+
 	ops := newBPFOps(bpfOpsParams{
 		Lifecycle:      lc,
 		Log:            log,
@@ -1687,6 +1691,7 @@ func TestBPFOpsSourceRanges(t *testing.T) {
 		Maglev:         maglev,
 		DB:             db,
 		NodeAddresses:  nodeAddrs,
+		Frontends:      frontends,
 		Group:          fakeGroup{},
 	})
 
@@ -1764,7 +1769,7 @@ func TestBPFOpsSourceRanges(t *testing.T) {
 	fe.Backends = beSeq(baseBackend, newTestBackend(backend2, loadbalancer.BackendStateActive))
 	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, fe), "Update without ranges")
 	require.Equal(t, 0, countLines("SRCRANGEIDX:"), "orphan source ranges not cleaned up")
-	require.NoError(t, ops.Delete(context.TODO(), nil, 0, fe), "Delete")
+	require.NoError(t, ops.Delete(context.TODO(), db.ReadTxn(), 0, fe), "Delete")
 
 	// ClusterIP frontends are excluded from the source range index algorithm.
 	svc := baseService
@@ -1777,7 +1782,7 @@ func TestBPFOpsSourceRanges(t *testing.T) {
 	require.NoError(t, ops.Update(context.TODO(), db.ReadTxn(), 0, &feCluster), "Update ClusterIP")
 	require.Equal(t, 0, countLines("LBALG=source-range-index"), "ClusterIP frontend must not use the algorithm")
 
-	require.NoError(t, ops.Delete(context.TODO(), nil, 0, &feCluster), "Delete")
+	require.NoError(t, ops.Delete(context.TODO(), db.ReadTxn(), 0, &feCluster), "Delete")
 	require.Empty(t, dumpLBMapsWithReplace(lbmaps, frontendAddrs[0], false), "BPF maps not empty")
 }
 
@@ -1825,6 +1830,9 @@ func TestBPFOpsSourceRangesConflict(t *testing.T) {
 	}
 	wtxn.Commit()
 
+	frontends, err := loadbalancer.NewFrontendsTable(cfg, db)
+	require.NoError(t, err)
+
 	ops := newBPFOps(bpfOpsParams{
 		Lifecycle:      lc,
 		Log:            log,
@@ -1834,6 +1842,7 @@ func TestBPFOpsSourceRangesConflict(t *testing.T) {
 		Maglev:         maglev,
 		DB:             db,
 		NodeAddresses:  nodeAddrs,
+		Frontends:      frontends,
 		Group:          fakeGroup{},
 	})
 
