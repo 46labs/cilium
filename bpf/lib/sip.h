@@ -12,13 +12,15 @@
 /* sip_inspect() uses direct packet access. TC skbs received after tunnel
  * decapsulation may keep the SIP payload outside the linear head, even though
  * skb_load_bytes() can still read the SIP method. Pull only the parser window
- * that can actually be inspected: 1000 bytes while looking for Call-ID, the
- * 9-byte header itself and the 68-byte Call-ID bounds window.
+ * that can actually be inspected: header lines starting in the first 1000
+ * bytes, the 9-byte header name and the value hashed after it.
  */
 #define SIP_L3_HEADERS_LEN (sizeof(struct ethhdr) + sizeof(struct iphdr))
 #define SIP_PAYLOAD_OFFSET (SIP_L3_HEADERS_LEN + sizeof(struct udphdr))
 #define SIP_METHOD_LEN 10
 #define SIP_PARSE_WINDOW (SIP_PAYLOAD_OFFSET + 1000 + 9 + 68)
+/* 8-byte words scanned for line starts: the first 1000 payload bytes. */
+#define SIP_SCAN_WORDS 125
 
 static inline __u8 is_sip(const char *cur, const char *data_end)
 {
@@ -94,18 +96,45 @@ static inline __u8 is_sip(const char *cur, const char *data_end)
 	return 0;
 }
 
+/* FNV-1a of the Call-ID value at off: one optional leading whitespace byte
+ * skipped, at most 64 bytes, and the value must end in CRLF inside the packet.
+ * A global function, so the verifier checks it once rather than once per scan
+ * position in the caller.
+ */
+__noinline __weak __u32 sip_hash_call_id(struct __ctx_buff *ctx, __u32 off)
+{
+	void *data = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
+	__u32 hash = 0x811c9dc5;
+	void *cur;
+
+	if (off > SIP_PARSE_WINDOW)
+		return NOT_FOUND;
+	cur = data + off;
+	if (cur + 1 > data_end)
+		return NOT_FOUND;
+	if (*(__u8 *)cur == ' ' || *(__u8 *)cur == '\t')
+		cur++;
+
+	for (int i = 0; i < 64; i++) {
+		if (cur + i + 2 > data_end)
+			return NOT_FOUND;
+		if (*(__u8 *)(cur + i) == '\r' && *(__u8 *)(cur + i + 1) == '\n')
+			return i ? hash : NOT_FOUND;
+		hash ^= *(__u8 *)(cur + i);
+		hash *= 0x01000193;
+	}
+	return hash;
+}
+
 __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 {
 	static const __u64 call_id1 = 0x3a64692d6c6c6163ULL; // "call-id:"
-	static const __u32 compact_call_id = 0x3a690a0d; // "\r\ni:"
 
 	void *data, *data_end;
 	struct ethhdr *eth = NULL;
 	struct iphdr *iph = NULL;
-	__u32 hash = 0x811c9dc5;
-	__u32 fnv_prime = 0x01000193;
 	__u64 method[2] = {};
-	__u8 call_id[68];
 	__u32 pull_len;
 
 	data = (void *)(long)ctx->data;
@@ -158,67 +187,47 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 
 		if (data + SIP_PAYLOAD_OFFSET + SIP_METHOD_LEN > data_end)
 			return NOT_FOUND;
-
-		cur = data + SIP_PAYLOAD_OFFSET;
 	}
 
-	int found = 0;
-	cur += 7;
+	/* Fixed 8-byte stride, so word loads do not depend on each other. A word
+	 * holding a LF tests the header name at the start of the next line. Line
+	 * starts stay inside the pulled parser window.
+	 */
+	for (int i = 0; i < SIP_SCAN_WORDS; i++) {
+		__u32 base = SIP_PAYLOAD_OFFSET + i * 8;
 
-	for (int i = 0; i < 1000; i++) {
-		if (cur + 1 > data_end)
-			break;
+		cur = data + base;
+		if (ctx_no_room(cur + 8, data_end))
+			return NOT_FOUND;
 
-		__u64 v = *(__u64 *)(cur - 7);
+		__u64 x = *(__u64 *)cur ^ 0x0a0a0a0a0a0a0a0aULL;
+		__u64 t = (x - 0x0101010101010101ULL) & ~x & 0x8080808080808080ULL;
 
-		if ((v | 0x0020200020202020ULL) == call_id1 ||
-		    ((__u32)(v >> 32) | 0x00200000) == compact_call_id) {
-			found = 1;
-			break;
+		for (int j = 0; j < 3 && t; j++) {
+			__u64 low = t & -t;
+			/* 1..8: bytes from cur to the start of the next line. */
+			__u32 adv = ((((low >> 7) * 0x0102030405060708ULL) >> 56) & 0xf);
+			__u32 off = base + adv;
+			void *line = data + off;
+
+			t &= t - 1;
+			/* The borrow can flag the byte above a LF; check it. */
+			if (ctx_no_room(line + 2, data_end))
+				return NOT_FOUND;
+			if (*(__u8 *)(line - 1) != '\n')
+				continue;
+
+			__u16 h = *(__u16 *)line | 0x2020;
+
+			if (h == 0x3a69)
+				return sip_hash_call_id(ctx, off + 2);
+			if (h != 0x6163 || ctx_no_room(line + 8, data_end))
+				continue;
+			if ((*(__u64 *)line | 0x0020200020202020ULL) == call_id1)
+				return sip_hash_call_id(ctx, off + 8);
 		}
-
-		cur++;
 	}
-
-	if (!found)
-		return NOT_FOUND;
-	cur++;
-
-	if (ctx_load_bytes(ctx, (__u32)((char *)cur - (char *)data), call_id,
-			   sizeof(call_id)) < 0)
-		return NOT_FOUND;
-	cur = call_id;
-
-	/* Skip one optional whitespace byte without making cur variable-offset. */
-	__u8 first = *(__u8 *)cur;
-	__u8 has_lws = first == ' ' || first == '\t';
-	if (!has_lws) {
-		if (*(__u8 *)cur == '\r' && *(__u8 *)(cur + 1) == '\n')
-			return hash;
-
-		hash ^= first;
-		hash *= fnv_prime;
-	}
-	cur++;
-
-	/* Long Call-IDs keep affinity based on the first 64 bytes. */
-#pragma unroll
-	for (int i = 0; i < 63; i++) {
-		if (*(__u8 *)(cur + i) == '\r' &&
-		    *(__u8 *)(cur + i + 1) == '\n')
-			return hash;
-
-		hash ^= *(unsigned char *)(cur + i);
-		hash *= fnv_prime;
-	}
-
-	if (has_lws && !(*(__u8 *)(cur + 63) == '\r' &&
-			 *(__u8 *)(cur + 64) == '\n')) {
-		hash ^= *(unsigned char *)(cur + 63);
-		hash *= fnv_prime;
-	}
-
-	return hash;
+	return NOT_FOUND;
 }
 
 #endif /* ENABLE_SIP_INSPECTION */
