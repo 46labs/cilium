@@ -208,22 +208,29 @@ __noinline __weak __u32 sip_inspect(struct __ctx_buff *ctx)
 			/* 1..8: bytes from cur to the start of the next line. */
 			__u32 adv = ((((low >> 7) * 0x0102030405060708ULL) >> 56) & 0xf);
 			__u32 off = base + adv;
-			void *line = data + off;
+			/* Read from the byte before the line start. The barrier keeps
+			 * the -1 in the scalar: older verifiers reject a negative
+			 * constant offset on a packet pointer.
+			 */
+			__u32 prev_off = off - 1;
+
+			asm volatile("" : "+r"(prev_off));
+			void *prev = data + prev_off;
 
 			t &= t - 1;
 			/* The borrow can flag the byte above a LF; check it. */
-			if (ctx_no_room(line + 2, data_end))
+			if (ctx_no_room(prev + 3, data_end))
 				return NOT_FOUND;
-			if (*(__u8 *)(line - 1) != '\n')
+			if (*(__u8 *)prev != '\n')
 				continue;
 
-			__u16 h = *(__u16 *)line | 0x2020;
+			__u16 h = *(__u16 *)(prev + 1) | 0x2020;
 
 			if (h == 0x3a69)
 				return sip_hash_call_id(ctx, off + 2);
-			if (h != 0x6163 || ctx_no_room(line + 8, data_end))
+			if (h != 0x6163 || ctx_no_room(prev + 9, data_end))
 				continue;
-			if ((*(__u64 *)line | 0x0020200020202020ULL) == call_id1)
+			if ((*(__u64 *)(prev + 1) | 0x0020200020202020ULL) == call_id1)
 				return sip_hash_call_id(ctx, off + 8);
 		}
 	}
