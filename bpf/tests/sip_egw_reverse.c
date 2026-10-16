@@ -39,23 +39,19 @@
 
 #define SIP_INVITE                                                     \
 	"INVITE sip:x SIP/2.0\r\n"                                        \
-	"Call-ID: " SIP_CALL_ID "\r\n"                                  \
-	"X: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n\r\n"
+	"Call-ID: " SIP_CALL_ID "\r\n\r\n"
 
 #define SIP_RESPONSE                                                   \
 	"SIP/2.0 100 Trying\r\n"                                           \
-	"Call-ID: " SIP_CALL_ID "\r\n"                                  \
-	"X: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n\r\n"
+	"Call-ID: " SIP_CALL_ID "\r\n\r\n"
 
 #define SIP_EXTERNAL_RESPONSE                                          \
 	"SIP/2.0 100 Trying\r\n"                                           \
-	"Call-ID: " SIP_EXTERNAL_CALL_ID "\r\n"                         \
-	"X: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n\r\n"
+	"Call-ID: " SIP_EXTERNAL_CALL_ID "\r\n\r\n"
 
 #define SIP_LOCAL_RESPONSE                                             \
 	"SIP/2.0 100 Trying\r\n"                                           \
-	"Call-ID: " SIP_LOCAL_CALL_ID "\r\n"                            \
-	"X: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n\r\n"
+	"Call-ID: " SIP_LOCAL_CALL_ID "\r\n\r\n"
 
 static volatile const __u8 *lb3_mac = mac_one;
 static volatile const __u8 *peer_mac = mac_two;

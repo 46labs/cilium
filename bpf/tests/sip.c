@@ -592,3 +592,108 @@ int bpf_test_no_callid(__maybe_unused struct __ctx_buff *ctx)
 
 	test_finish();
 }
+
+/* ------------------------------------------------------------------ */
+/* Call-ID position: short tails, line starts and word offsets          */
+/* ------------------------------------------------------------------ */
+
+static __always_inline int
+sip_pktgen_payload(struct __ctx_buff *ctx, char *payload, __u32 len)
+{
+	struct pktgen builder;
+	struct udphdr *l4;
+	struct ethhdr *l2;
+	struct iphdr *l3;
+
+	pktgen__init(&builder, ctx);
+
+	l2 = pktgen__push_ethhdr(&builder);
+	if (!l2)
+		return TEST_ERROR;
+	ethhdr__set_macs(l2, (__u8 *)client_mac, (__u8 *)ext_svc_mac);
+
+	l3 = pktgen__push_default_iphdr(&builder);
+	if (!l3)
+		return TEST_ERROR;
+	l3->saddr = CLIENT_IP;
+	l3->daddr = EXTERNAL_SVC_IP;
+	l3->protocol = IPPROTO_UDP;
+
+	l4 = pktgen__push_default_udphdr(&builder);
+	if (!l4)
+		return TEST_ERROR;
+	l4->source = CLIENT_PORT;
+	l4->dest = EXTERNAL_SVC_PORT;
+
+	if (!pktgen__push_data(&builder, payload, len))
+		return TEST_ERROR;
+
+	pktgen__finish(&builder);
+	return 0;
+}
+
+#define SIP_HASH_TEST(name, payload, expected)				\
+	PKTGEN("tc", "sip_" #name)					\
+	int sip_##name##_pktgen(struct __ctx_buff *ctx)			\
+	{								\
+		return sip_pktgen_payload(ctx, payload,			\
+					  sizeof(payload) - 1);		\
+	}								\
+	CHECK("tc", "sip_" #name)					\
+	int sip_##name##_check(__maybe_unused struct __ctx_buff *ctx)	\
+	{								\
+		test_init();						\
+		__u32 got = sip_inspect(ctx);				\
+		if (got != (expected))					\
+			test_fatal("hash mismatch: got=%lx expected=%lx",\
+				   got, (expected));			\
+		test_finish();						\
+	}
+
+#define SIP_CALL_ID_63 \
+	"ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+#define SIP_CALL_ID_63_HASH 0xb1acc1e4
+#define SIP_CALL_ID_64 \
+	"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+#define SIP_CALL_ID_64_HASH 0xdc08fbc5
+
+/* Call-ID is the last header, so fewer than 68 bytes follow its colon. */
+SIP_HASH_TEST(resp_callid_last,
+	      "SIP/2.0 200 OK\r\nCSeq: 314159 OPTIONS\r\n"
+	      "Call-ID: " SIP_CALL_ID "\r\n\r\n", SIP_CALL_ID_HASH)
+SIP_HASH_TEST(resp_compact_last,
+	      "SIP/2.0 200 OK\r\nCSeq: 314159 OPTIONS\r\n"
+	      "i: " SIP_CALL_ID "\r\n\r\n", SIP_CALL_ID_HASH)
+SIP_HASH_TEST(resp_upper_nolws_last,
+	      "SIP/2.0 200 OK\r\nCSEQ: 314159 OPTIONS\r\n"
+	      "CALL-ID:" SIP_CALL_ID "\r\n\r\n", SIP_CALL_ID_HASH)
+SIP_HASH_TEST(resp_63_last,
+	      "SIP/2.0 200 OK\r\nCSeq: 1 OPTIONS\r\n"
+	      "Call-ID: " SIP_CALL_ID_63 "\r\n\r\n", SIP_CALL_ID_63_HASH)
+SIP_HASH_TEST(resp_64_last,
+	      "SIP/2.0 200 OK\r\nCSeq: 1 OPTIONS\r\n"
+	      "Call-ID: " SIP_CALL_ID_64 "\r\n\r\n", SIP_CALL_ID_64_HASH)
+
+/* The LF before Call-ID at each byte of an 8-byte word. */
+#define SIP_PAD_RESP(pad)						\
+	"SIP/2.0 200 OK\r\nCSeq: 1 OPTIONS" pad "\r\n"			\
+	"Call-ID: " SIP_CALL_ID "\r\n\r\n"
+SIP_HASH_TEST(lf_offset_0, SIP_PAD_RESP(""), SIP_CALL_ID_HASH)
+SIP_HASH_TEST(lf_offset_1, SIP_PAD_RESP("x"), SIP_CALL_ID_HASH)
+SIP_HASH_TEST(lf_offset_2, SIP_PAD_RESP("xx"), SIP_CALL_ID_HASH)
+SIP_HASH_TEST(lf_offset_3, SIP_PAD_RESP("xxx"), SIP_CALL_ID_HASH)
+SIP_HASH_TEST(lf_offset_4, SIP_PAD_RESP("xxxx"), SIP_CALL_ID_HASH)
+SIP_HASH_TEST(lf_offset_5, SIP_PAD_RESP("xxxxx"), SIP_CALL_ID_HASH)
+SIP_HASH_TEST(lf_offset_6, SIP_PAD_RESP("xxxxxx"), SIP_CALL_ID_HASH)
+SIP_HASH_TEST(lf_offset_7, SIP_PAD_RESP("xxxxxxx"), SIP_CALL_ID_HASH)
+
+/* Only a header line named Call-ID counts, not a name ending in it. */
+SIP_HASH_TEST(resp_decoy_header,
+	      "SIP/2.0 200 OK\r\nX-Orig-Call-ID: decoy\r\n"
+	      "Call-ID: " SIP_CALL_ID "\r\nCSeq: 1 OPTIONS\r\n\r\n",
+	      SIP_CALL_ID_HASH)
+
+/* A value cut off before its CRLF has no key. */
+SIP_HASH_TEST(resp_truncated_value,
+	      "SIP/2.0 200 OK\r\nCSeq: 1 OPTIONS\r\nCall-ID: " SIP_CALL_ID,
+	      0)
